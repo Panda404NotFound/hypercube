@@ -1,0 +1,31 @@
+{
+  "name": "hypercube-wasm",
+  "version": "0.1.0",
+  "description": "WebAssembly modules for the HYPERCUBE project",
+  "main": "pkg/hypercube_wasm.js",
+  "types": "pkg/hypercube_wasm.d.ts",
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir pkg",
+    "build:dev": "wasm-pack build --dev --target web --out-dir pkg",
+    "test": "wasm-pack test --node"
+  },
+  "files": [
+    "pkg"
+  ],
+  "keywords": [
+    "webassembly",
+    "wasm",
+    "rust",
+    "hypercube",
+    "physics"
+  ],
+  "author": "HYPERCUBE Team",
+  "license": "MIT",
+  "devDependencies": {
+    "wasm-pack": "^0.0.0"
+  },
+  "dependencies": {
+    "next": "14.2.28",
+    "vite": "^5.1.4"
+  }
+}
