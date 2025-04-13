@@ -4,25 +4,17 @@ import styles from "./page.module.css";
 export default function Home() {
   return (
     <main className={styles.main}>
-      <div className={styles.backgroundContainer}>
-        <Image 
-          src="/background.png" 
-          alt="Background" 
-          fill 
-          className={styles.backgroundImage}
-          priority
-          sizes="100vw"
-        />
-      </div>
+      {/* Simple div with background image */}
+      <div className={styles.backgroundContainer}></div>
       
+      {/* Content positioned according to design */}
       <div className={styles.contentContainer}>
-        <div className={styles.synthLogoWrapper}>
+        <div className={styles.logoContainer}>
           <Image 
-            src="/synth_logo.png" 
+            src="/images/synth_logo.png" 
             alt=".synth" 
-            width={1000}
-            height={300}
-            className={styles.synthLogo}
+            width={500}
+            height={146}
             priority
           />
         </div>

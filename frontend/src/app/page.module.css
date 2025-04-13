@@ -1,44 +1,72 @@
 .main {
-  position: relative;
-  width: 100%;
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
+  width: 100%;
+  position: relative;
   overflow: hidden;
+  background-color: #000;
 }
 
 .backgroundContainer {
   position: absolute;
-  width: 100%;
-  height: 100%;
   top: 0;
   left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('/images/background.png');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  filter: brightness(0.9) contrast(0.95) blur(0.3px); /* Add slight blur to reduce grid pattern */
+  z-index: 0;
+  transform: scale(1.01); /* Slightly scale up to hide edges */
+}
+
+/* Add two overlay layers for better control */
+.backgroundContainer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0) 20%, rgba(0,0,0,0) 80%, rgba(0,0,0,0.2) 100%);
   z-index: 1;
 }
 
-.backgroundImage {
-  object-fit: cover;
-  object-position: center;
+.backgroundContainer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 0%, rgba(0,0,0,0.4) 100%); /* Stronger darkened edges */
+  z-index: 1;
 }
 
 .contentContainer {
   position: relative;
   width: 100%;
-  height: 100vh;
+  padding: 0 20px;
   display: flex;
   flex-direction: column;
-  align-items: center;
   z-index: 2;
-  padding: 20px;
+}
+
+.logoContainer {
+  margin-top: 15vh;
+  width: 45%;
+  max-width: 500px;
+  align-self: center;
 }
 
 .synthLogoWrapper {
-  margin-top: 60px;
   display: flex;
   justify-content: center;
-  filter: blur(13.1px);
   position: relative;
-  width: 40%;
+  width: 45%;
   max-width: 500px;
 }
 
@@ -78,10 +106,15 @@
 }
 
 /* Responsive adjustments */
+@media (max-width: 1024px) {
+  .logoContainer {
+    width: 60%;
+  }
+}
+
 @media (max-width: 768px) {
-  .synthLogoWrapper {
+  .logoContainer {
     width: 70%;
-    margin-top: 40px;
   }
   
   .title {
@@ -96,8 +129,7 @@
 }
 
 @media (max-width: 480px) {
-  .synthLogoWrapper {
+  .logoContainer {
     width: 90%;
-    margin-top: 30px;
   }
 } 
