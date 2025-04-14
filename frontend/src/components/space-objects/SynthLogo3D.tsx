@@ -699,11 +699,11 @@ const SynthLogo3D = () => {
   });
   
   return (
-    <group position={[0, 70, 150]}>
+    <group position={[0, 40, 100]}>
       {/* Добавляем фоновую плоскость для блокировки комет за логотипом */}
       <mesh 
         position={[0, 0, -0.1]} // Немного позади логотипа
-        scale={[10, 10, 1]} // Достаточно большая, чтобы покрыть логотип
+        scale={[50, 50, 50]} // Достаточно большая, чтобы покрыть логотип
       >
         <planeGeometry args={[dimensions.width * 1.2, dimensions.height * 1.2]} />
         <meshBasicMaterial 

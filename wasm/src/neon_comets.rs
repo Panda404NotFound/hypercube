@@ -14,8 +14,8 @@ use crate::space_objects::{
 };
 
 // Константы для неоновых комет
-const MIN_COMET_SIZE_PERCENT: f32 = 23.0;   // Минимальный размер кометы (% от пространства)
-const MAX_COMET_SIZE_PERCENT: f32 = 47.0;  // Максимальный размер кометы (% от пространства)
+const MIN_COMET_SIZE_PERCENT: f32 = 17.0;   // Минимальный размер кометы (% от пространства)
+const MAX_COMET_SIZE_PERCENT: f32 = 67.0;  // Максимальный размер кометы (% от пространства)
 const COMET_LIFETIME_AFTER_PASS: f32 = 30.0; // Время жизни после прохождения через наблюдателя (в %)
 const MAX_COMET_LIFETIME: f32 = 60.0;      // Максимальное время жизни в секундах
 const MIN_SPAWN_DELAY: f32 = 1.0;          // Минимальная задержка респауна (в секундах)

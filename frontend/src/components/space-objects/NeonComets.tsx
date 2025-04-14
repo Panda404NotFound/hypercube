@@ -1152,10 +1152,11 @@ const NeonComets = () => {
                     cometGeometries.core,
                     new THREE.MeshStandardMaterial({
                       emissive: new THREE.Color(r, g, b),
-                      emissiveIntensity: 1.0,
+                      emissiveIntensity: 1.5,
                       roughness: 0.2,
-                      metalness: 0.8,
+                      metalness: 0.9,
                       transparent: true,
+                      opacity: 0.8,
                       depthWrite: false,
                       blending: THREE.AdditiveBlending
                     })
@@ -1165,63 +1166,28 @@ const NeonComets = () => {
                   core.userData.isCometCore = true;
                   cometObj.add(core);
                   
-                  // Создаем кому (облако вокруг ядра)
-                  const coma = new THREE.Mesh(
-                    cometGeometries.coma,
-                    new THREE.MeshPhongMaterial({
-                      color: new THREE.Color(r, g, b),
-                      transparent: true,
-                      opacity: 0.5,
-                      emissive: new THREE.Color(r, g, b),
-                      emissiveIntensity: 0.5,
-                      shininess: 50,
-                      blending: THREE.AdditiveBlending,
-                      depthWrite: false
-                    })
-                  );
-                  coma.name = 'coma';
-                  coma.renderOrder = 2;
-                  cometObj.add(coma);
-                  
-                  // Добавляем хвост с улучшенным эффектом
-                  const tail = new THREE.Mesh(
-                    cometGeometries.tail,
+                  // Добавляем внутреннее свечение как дополнительное ядро с меньшим размером
+                  const innerGlow = new THREE.Mesh(
+                    cometGeometries.core.clone(),
                     new THREE.MeshBasicMaterial({
-                      color: new THREE.Color(r, g, b),
-                      transparent: true,
-                      opacity: 0.3,
-                      blending: THREE.AdditiveBlending,
-                      side: THREE.DoubleSide,
-                      depthWrite: false
-                    })
-                  );
-                  tail.name = 'tail';
-                  tail.renderOrder = 3;
-                  tail.rotation.x = Math.PI; // Направляем хвост назад
-                  tail.position.z = -0.8;
-                  cometObj.add(tail);
-                  
-                  // Добавляем частицы для хвоста
-                  const particles = new THREE.Points(
-                    cometGeometries.particles,
-                    new THREE.PointsMaterial({
-                      color: new THREE.Color(r, g, b),
-                      size: 0.05,
+                      color: new THREE.Color(r * 1.2, g * 1.2, b * 1.2),
                       transparent: true,
                       opacity: 0.6,
                       blending: THREE.AdditiveBlending,
-                      sizeAttenuation: true,
-                      depthWrite: false,
-                      vertexColors: true
+                      depthWrite: false
                     })
                   );
-                  particles.name = 'particles';
-                  particles.renderOrder = 4;
-                  cometObj.add(particles);
+                  innerGlow.name = 'innerGlow';
+                  innerGlow.scale.set(0.7, 0.7, 0.7);
+                  innerGlow.userData.pulseFactor = 0.2 + Math.random() * 0.3; // Разная скорость пульсации
+                  innerGlow.userData.pulseOffset = Math.random() * Math.PI * 2; // Разный фазовый сдвиг
+                  cometObj.add(innerGlow);
                   
                   // Добавляем свечение
-                  const glow = new THREE.PointLight(new THREE.Color(r, g, b), 2.0, 10);
+                  const glow = new THREE.PointLight(new THREE.Color(r, g, b), 1.5, 7);
                   glow.name = 'glow';
+                  glow.userData.pulseFactor = 0.15 + Math.random() * 0.2; // Индивидуальная скорость пульсации
+                  glow.userData.pulseOffset = Math.random() * Math.PI * 2; // Индивидуальный фазовый сдвиг
                   cometObj.add(glow);
                   
                   // Добавляем комету в группу
@@ -1239,51 +1205,49 @@ const NeonComets = () => {
                 const core = cometObj.children.find(child => child.name === 'core') as THREE.Mesh;
                 if (core) {
                   const material = core.material as THREE.MeshStandardMaterial;
-                  material.opacity = opacity;
+                  material.opacity = opacity * (0.7 + Math.sin(timeRef.current * 3 + id * 0.5) * 0.1);
                   material.emissive.setRGB(r, g, b);
-                  material.emissiveIntensity = glowIntensity * 0.8;
+                  material.emissiveIntensity = glowIntensity * (0.7 + Math.sin(timeRef.current * 2 + id) * 0.3);
                 }
                 
-                // Кома (облако)
-                const coma = cometObj.children.find(child => child.name === 'coma') as THREE.Mesh;
-                if (coma) {
-                  const material = coma.material as THREE.MeshPhongMaterial;
-                  material.opacity = opacity * 0.7;
-                  material.color.setRGB(r, g, b);
-                  material.emissive.setRGB(r, g, b);
-                  material.emissiveIntensity = glowIntensity * 0.5;
-                }
-                
-                // Хвост
-                const tail = cometObj.children.find(child => child.name === 'tail') as THREE.Mesh;
-                if (tail) {
-                  const material = tail.material as THREE.MeshBasicMaterial;
-                  material.opacity = opacity * 0.5;
-                  material.color.setRGB(r, g, b);
+                // Внутреннее свечение
+                const innerGlow = cometObj.children.find(child => child.name === 'innerGlow') as THREE.Mesh;
+                if (innerGlow) {
+                  const material = innerGlow.material as THREE.MeshBasicMaterial;
+                  const pulseFactor = innerGlow.userData.pulseFactor || 0.2;
+                  const pulseOffset = innerGlow.userData.pulseOffset || 0;
                   
-                  // Изменяем размер хвоста в зависимости от параметра tailLength
-                  tail.scale.set(1.0, 1.0, tailLength);
-                  tail.position.z = -0.8 - tailLength * 0.5;
-                }
-                
-                // Частицы хвоста
-                const particles = cometObj.children.find(child => child.name === 'particles') as THREE.Points;
-                if (particles) {
-                  const material = particles.material as THREE.PointsMaterial;
-                  material.opacity = opacity * 0.6;
-                  material.color.setRGB(r, g, b);
-                  material.size = 0.05 + glowIntensity * 0.05;
+                  // Пульсация размера
+                  const pulseScale = 0.6 + Math.sin(timeRef.current * pulseFactor * 5 + pulseOffset) * 0.15;
+                  innerGlow.scale.set(pulseScale, pulseScale, pulseScale);
                   
-                  // Масштабируем частицы по длине хвоста
-                  particles.scale.set(1.0, 1.0, tailLength);
+                  // Пульсация яркости
+                  material.opacity = opacity * (0.5 + Math.sin(timeRef.current * pulseFactor * 3 + pulseOffset) * 0.3);
+                  
+                  // Плавное изменение цвета
+                  const hueShift = (Math.sin(timeRef.current * 0.3 + id * 2) * 0.1) % 1.0;
+                  const colorVariant = new THREE.Color(r, g, b);
+                  colorVariant.offsetHSL(hueShift, 0, 0);
+                  material.color.copy(colorVariant).multiplyScalar(1.5); // Ярче основного цвета
                 }
                 
                 // Обновляем свечение
                 const glow = cometObj.children.find(child => child.name === 'glow') as THREE.PointLight;
                 if (glow) {
-                  glow.color.setRGB(r, g, b);
-                  glow.intensity = glowIntensity * 2.0;
-                  glow.distance = scale * 10 * tailLength;
+                  const pulseFactor = glow.userData.pulseFactor || 0.15;
+                  const pulseOffset = glow.userData.pulseOffset || 0;
+                  
+                  // Пульсация интенсивности света
+                  const pulseIntensity = 1.2 + Math.sin(timeRef.current * pulseFactor * 4 + pulseOffset) * 0.8;
+                  glow.intensity = glowIntensity * pulseIntensity;
+                  
+                  // Пульсация дальности освещения
+                  glow.distance = scale * (6 + Math.sin(timeRef.current * pulseFactor * 2.5 + pulseOffset) * 2);
+                  
+                  // Небольшие изменения цвета для создания мерцания
+                  const colorShift = new THREE.Color(r, g, b);
+                  colorShift.offsetHSL(Math.sin(timeRef.current * 0.5 + id) * 0.08, 0, 0);
+                  glow.color.copy(colorShift);
                 }
               }
               
