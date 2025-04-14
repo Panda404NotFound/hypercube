@@ -313,12 +313,12 @@ const SynthLogo3D = () => {
   });
   
   return (
-    <group position={[0, 5, -10]}>
+    <group position={[0, 70, 150]}>
       <mesh 
         ref={meshRef}
         castShadow={false}
         receiveShadow={false}
-        scale={[-1, 1, 1]} // Инвертируем по X для исправления зеркального отображения
+        scale={[-10, 10, 10]} // Увеличенный масштаб, но не слишком большой
         userData={{ isLogo: true }} // Метка, чтобы находить логотип
       >
         <planeGeometry args={[dimensions.width, dimensions.height]} />
@@ -337,10 +337,10 @@ const SynthLogo3D = () => {
       
       {/* Добавляем свет для дополнительного эффекта свечения */}
       <pointLight 
-        position={[0, 0, 1]} 
+        position={[0, 0, 5]} 
         color="#00ff83" 
-        intensity={2} 
-        distance={10}
+        intensity={10} 
+        distance={50} 
         decay={2}
       />
     </group>
