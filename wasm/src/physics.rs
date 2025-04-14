@@ -24,6 +24,7 @@ pub struct PhysicsWorld {
 }
 
 // Initialize physics world
+#[wasm_bindgen]
 pub fn init_world() -> usize {
     let gravity = vector![0.0, -9.81, 0.0];
     let integration_parameters = IntegrationParameters::default();
@@ -114,4 +115,4 @@ pub fn step_simulation(world_id: usize, dt: f32) -> bool {
         
         false
     }
-} 
+}
