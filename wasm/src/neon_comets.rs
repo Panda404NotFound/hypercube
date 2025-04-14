@@ -278,8 +278,8 @@ impl SpaceObject for NeonComet {
                 self.random_offset = local_rng.gen_range(-50.0..50.0);
                 
                 self.initialize_random(&mut local_rng, space);
-                console::log_1(&format!("Comet {} respawned for the {} time with offset {}", 
-                    self.data.id, self.respawn_count, self.random_offset).into());
+                // console::log_1(&format!("Comet {} respawned for the {} time with offset {}", 
+                //     self.data.id, self.respawn_count, self.random_offset).into());
             }
             
             return true; // Объект остаётся активным, но не отображается
@@ -542,7 +542,7 @@ pub fn process_neon_comet_spawns(dt: f32) -> usize {
     // если в очереди мало комет и общее количество активных комет мало
     if pending.len() < 3 {
         // Проверяем количество активных комет во всех системах
-        let mut total_active_comets = 0;
+        // let mut total_active_comets = 0;
         
         // Используем итератор DashMap для доступа к системам
         for system_ref in SPACE_OBJECT_SYSTEMS.iter() {
@@ -555,7 +555,7 @@ pub fn process_neon_comet_spawns(dt: f32) -> usize {
                     .filter(|c| !c.as_any().downcast_ref::<NeonComet>().unwrap().waiting_for_respawn)
                     .count();
                 
-                total_active_comets += active_comets;
+               // total_active_comets += active_comets;
                 
                 // Если в системе мало активных комет, добавляем новые
                 if active_comets < 5 {
@@ -568,12 +568,12 @@ pub fn process_neon_comet_spawns(dt: f32) -> usize {
                         pending.push((system_id, delay));
                     }
                     
-                    console::log_1(&format!("Auto-scheduling {} new comets for system {}", new_comets, system_id).into());
+                    // console::log_1(&format!("Auto-scheduling {} new comets for system {}", new_comets, system_id).into());
                 }
             }
         }
         
-        console::log_1(&format!("Total active comets: {}", total_active_comets).into());
+        // console::log_1(&format!("Total active comets: {}", total_active_comets).into());
     }
     
     spawned
@@ -666,7 +666,7 @@ pub fn get_visible_neon_comets(system_id: usize) -> Option<CometDataArray> {
                 glow_intensities: Vec::with_capacity(comets.len()),
             };
             
-            let mut visible_count = 0;
+            // let mut visible_count = 0;
             
             for comet in comets.iter() {
                 // Получаем доступ к специфичным для кометы данным
@@ -687,7 +687,7 @@ pub fn get_visible_neon_comets(system_id: usize) -> Option<CometDataArray> {
                 
                 if is_visible {
                     let comet_data = comet.get_data();
-                    visible_count += 1;
+                    // visible_count += 1;
                     
                     // ID
                     data.ids.push(comet_data.id);
@@ -721,7 +721,7 @@ pub fn get_visible_neon_comets(system_id: usize) -> Option<CometDataArray> {
             }
             
             // Выводим количество видимых комет для отладки
-            console::log_1(&format!("Found {} visible comets out of {} total", visible_count, comets.len()).into());
+            // console::log_1(&format!("Found {} visible comets out of {} total", visible_count, comets.len()).into());
             
             // Даже если нет видимых комет, все равно возвращаем пустую структуру массива,
             // чтобы избежать проблем с нулевыми указателями в JavaScript
