@@ -251,6 +251,7 @@ const NeonComets = () => {
                   );
                   core.name = 'core';
                   core.renderOrder = 1;       // Устанавливаем порядок рендеринга
+                  core.userData.isCometCore = true; // Добавляем метку для идентификации комет
                   cometObj.add(core);
                   
                   // Создаем кому (облако вокруг ядра)

@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { NeonComets } from '../../components/space-objects';
+import { NeonComets, SynthLogo3D } from '../../components/space-objects';
 import { OrbitControls } from '@react-three/drei';
 
 // CameraController component to adjust the camera on mount
@@ -58,6 +58,9 @@ export default function SpaceScene() {
       <Suspense fallback={null}>
         {/* Неоновые кометы - конфигурация полностью в WASM */}
         <NeonComets />
+        
+        {/* 3D логотип Synth */}
+        <SynthLogo3D />
         
         {/* Полигональные кристаллы (будут добавлены позже) */}
         {/* <PolygonalCrystals /> */}

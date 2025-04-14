@@ -22,7 +22,8 @@ export default function Home() {
       
       {/* Content positioned according to design */}
       <div className={styles.contentContainer}>
-        <div className={styles.logoContainer}>
+        {/* HTML logo скрыт, так как теперь используется 3D версия в SpaceScene */}
+        {/* <div className={styles.logoContainer}>
           <Image 
             src="/images/synth_logo.png" 
             alt=".synth" 
@@ -30,7 +31,7 @@ export default function Home() {
             height={146}
             priority
           />
-        </div>
+        </div> */}
       </div>
     </main>
   );
