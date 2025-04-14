@@ -215,7 +215,7 @@ impl SpaceDefinition {
             min_z: -100.0,
             max_z: 100.0,
             viewport_size_percent: 25.0, // Видовой экран занимает 25% пространства
-            observer_position: Vec3::new(0.0, 0.0, 0.0), // Наблюдатель в центре пространства
+            observer_position: Vec3::new(0.0, 0.0, -25.0), // Обновляем позицию наблюдателя в соответствии с настройками камеры в React
             field_of_view: PI / 3.0, // 60 градусов
         }
     }
@@ -251,63 +251,101 @@ impl SpaceDefinition {
             return true;
         }
         
-        // If object is too far behind observer, it's not visible
-        if to_point.z < -10.0 {
+        // Если объект находится слишком далеко позади наблюдателя, он не видим
+        // Используем большее значение (-30), чтобы объекты оставались видимыми дольше
+        if to_point.z < -30.0 {
             return false;
+        }
+        
+        // Если объект находится прямо перед наблюдателем (в пределах 5 единиц), 
+        // он всегда видим независимо от углов
+        let distance = to_point.length();
+        if distance < 5.0 {
+            return true;
         }
         
         // Вычисляем границы видимой области на расстоянии точки
         let viewport_dims = self.get_viewport_dimensions();
         
-        // Increase the visible area by 50% to ensure objects at the edges are visible
-        let half_width = viewport_dims.x * 0.75; // 1.5x wider
-        let half_height = viewport_dims.y * 0.75; // 1.5x taller
+        // Увеличиваем видимую область на 50% для обеспечения видимости объектов на краях
+        let half_width = viewport_dims.x * 0.75; // 1.5x шире
+        let half_height = viewport_dims.y * 0.75; // 1.5x выше
         
-        // Use absolute z value to handle objects that might be slightly behind
-        let z_ratio = to_point.z.abs() / (self.max_z - self.min_z);
-        // Add a small offset to avoid division by very small numbers
-        let z_ratio = if z_ratio < 0.01 { 0.01 } else { z_ratio };
+        // Используем абсолютное значение z для обработки объектов, которые могут быть немного позади
+        // Избегаем деления на очень маленькие числа
+        let z_distance = to_point.z.abs().max(0.01);
         
-        let projected_x = to_point.x / z_ratio;
-        let projected_y = to_point.y / z_ratio;
+        // Расширяем видимую область для близких объектов
+        let scale_factor = 1.0 + (1.0 / z_distance) * 5.0; // Дополнительный масштаб для близких объектов
         
-        // More permissive check - slightly expand the visible area
-        projected_x.abs() <= half_width && projected_y.abs() <= half_height
+        let adjusted_half_width = half_width * scale_factor;
+        let adjusted_half_height = half_height * scale_factor;
+        
+        // Проецируем положение объекта на плоскость просмотра
+        let projected_x = to_point.x / z_distance * self.max_z;
+        let projected_y = to_point.y / z_distance * self.max_z;
+        
+        // Более гибкая проверка - немного расширяем видимую область
+        projected_x.abs() <= adjusted_half_width && projected_y.abs() <= adjusted_half_height
     }
     
     // Получить коэффициент масштабирования объекта в зависимости от расстояния
     pub fn get_scale_factor(&self, position: &Vec3) -> f32 {
+        // Вектор от наблюдателя до объекта
+        let to_point = *position - self.observer_position;
+        
         // Расстояние от наблюдателя до объекта
-        let distance = (*position - self.observer_position).length();
+        let distance = to_point.length();
         
-        // Максимальное расстояние в пространстве
-        let max_distance = self.get_dimensions().length();
+        // Максимальная дистанция для расчета масштаба
+        let max_distance = 200.0; // Фиксированное значение вместо вычисления
         
-        // Инвертированное нормализованное расстояние (ближе = больше)
-        1.0 - (distance / max_distance).min(1.0).max(0.0)
+        // Нормализованное расстояние (0-1)
+        let normalized_distance = (distance / max_distance).min(1.0);
+        
+        // Применяем более линейную функцию для предотвращения эффекта замедления
+        // при приближении к камере. Используем более мягкий переход.
+        let scale = 1.0 - normalized_distance * 0.8;
+        
+        // Для очень близких объектов используем плавное увеличение масштаба
+        // без резких изменений, чтобы избежать эффекта "отталкивания" от камеры
+        if distance < 10.0 {
+            // Плавное увеличение от 1.1x до 1.4x для близких объектов
+            let close_factor = 1.1 + (1.0 - (distance / 10.0)) * 0.3;
+            return scale * close_factor;
+        }
+        
+        scale
     }
     
     // Получить коэффициент прозрачности объекта в зависимости от расстояния
     pub fn get_transparency_factor(&self, position: &Vec3) -> f32 {
-        // Расстояние от наблюдателя до объекта
-        let distance = (*position - self.observer_position).length();
+        // Вектор от наблюдателя до объекта
+        let to_point = *position - self.observer_position;
         
-        // Максимальное расстояние в пространстве
-        let max_distance = self.get_dimensions().length();
+        // Расстояние от наблюдателя до объекта
+        let distance = to_point.length();
+        
+        // Максимальная дистанция для расчета прозрачности
+        let max_distance = 200.0;
         
         // Нормализованное расстояние
-        let normalized_distance = (distance / max_distance).min(1.0).max(0.0);
+        let normalized_distance = (distance / max_distance).min(1.0);
         
-        // Чем ближе к наблюдателю, тем более прозрачный объект
-        if normalized_distance < 0.5 {
-            // Объект приближается к наблюдателю
-            1.0 - normalized_distance * 2.0  // От 1.0 до 0.0
-        } else if normalized_distance > 0.9 {
-            // Объект слишком далеко - делаем его более прозрачным
-            (1.0 - normalized_distance) * 10.0  // Плавное исчезновение
-        } else {
-            // Объект на среднем расстоянии
-            1.0
+        // Убираем особую прозрачность для объектов около наблюдателя,
+        // вместо этого используем более мягкий переход
+        if distance < 10.0 {
+            // От 0.4 (очень близко) до 0.8 (на расстоянии 10 единиц)
+            return 0.4 + (distance / 10.0) * 0.4;
         }
+        
+        // На среднем расстоянии (10-150 единиц) объект полностью непрозрачный
+        if normalized_distance < 0.75 {
+            return 1.0;
+        }
+        
+        // На дальних дистанциях (более 150 единиц) объект постепенно исчезает
+        let fade_factor = (1.0 - normalized_distance) * 4.0; // Плавное исчезновение
+        return fade_factor.max(0.0).min(1.0);
     }
 } 

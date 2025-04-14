@@ -56,19 +56,14 @@ export default function SpaceScene() {
       <CameraController />
       
       <Suspense fallback={null}>
-        {/* Неоновые кометы - увеличиваем количество и скорость */}
-        <NeonComets 
-          count={20} 
-          speed={2.5} 
-          colorPrimary="#00ff83" 
-          colorSecondary="#0083ff" 
-        />
+        {/* Неоновые кометы - конфигурация полностью в WASM */}
+        <NeonComets />
         
         {/* Полигональные кристаллы (будут добавлены позже) */}
-        {/* <PolygonalCrystals count={5} /> */}
+        {/* <PolygonalCrystals /> */}
         
         {/* Энергетические сферы (будут добавлены позже) */}
-        {/* <EnergySpheres count={3} /> */}
+        {/* <EnergySpheres /> */}
       </Suspense>
       
       {/* Enhanced lighting for better visibility */}
