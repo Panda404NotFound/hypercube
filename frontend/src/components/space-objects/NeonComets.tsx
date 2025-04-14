@@ -1153,12 +1153,16 @@ const NeonComets = () => {
                     new THREE.MeshStandardMaterial({
                       emissive: new THREE.Color(r, g, b),
                       emissiveIntensity: 1.5,
-                      roughness: 0.2,
-                      metalness: 0.9,
+                      roughness: 0.3,    // Немного увеличиваем шероховатость для реализма
+                      metalness: 0.85,   // Чуть уменьшаем металличность для баланса
                       transparent: true,
                       opacity: 0.8,
                       depthWrite: false,
-                      blending: THREE.AdditiveBlending
+                      blending: THREE.AdditiveBlending,
+                      // Усиливаем нормали для более четкого рельефа
+                      normalScale: new THREE.Vector2(1.5, 1.5),
+                      // Включение объемного затенения для улучшения ощущения глубины
+                      flatShading: true
                     })
                   );
                   core.name = 'core';
@@ -1182,6 +1186,67 @@ const NeonComets = () => {
                   innerGlow.userData.pulseFactor = 0.2 + Math.random() * 0.3; // Разная скорость пульсации
                   innerGlow.userData.pulseOffset = Math.random() * Math.PI * 2; // Разный фазовый сдвиг
                   cometObj.add(innerGlow);
+                  
+                  // Добавляем еще более глубокое внутреннее ядро для эффекта параллакса и объема
+                  const deepCore = new THREE.Mesh(
+                    cometGeometries.core.clone(),
+                    new THREE.MeshPhongMaterial({
+                      color: new THREE.Color(r * 1.5, g * 1.5, b * 1.5),
+                      transparent: true,
+                      opacity: 0.4,
+                      blending: THREE.AdditiveBlending,
+                      depthWrite: false,
+                      shininess: 80, // Высокий блеск для внутреннего ядра
+                      specular: new THREE.Color(1, 1, 1) // Белые блики
+                    })
+                  );
+                  deepCore.name = 'deepCore';
+                  deepCore.scale.set(0.4, 0.4, 0.4);
+                  deepCore.userData.rotationSpeed = (Math.random() - 0.5) * 0.01; // Индивидуальная скорость вращения
+                  deepCore.userData.pulseFactor = 0.15 + Math.random() * 0.2;
+                  deepCore.userData.pulseOffset = Math.random() * Math.PI * 2;
+                  cometObj.add(deepCore);
+                  
+                  // Добавляем мерцающие искры для эффекта блеска
+                  const sparklesGeometry = new THREE.BufferGeometry();
+                  const sparkleCount = Math.floor(Math.random() * 10) + 15;
+                  const sparklePositions = new Float32Array(sparkleCount * 3);
+                  const sparkleSizes = new Float32Array(sparkleCount);
+                  
+                  // Расставляем искры по поверхности и чуть глубже кометы
+                  for (let i = 0; i < sparkleCount; i++) {
+                    // Создаем точки на поверхности сферы
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    const radius = 0.4 + Math.random() * 0.3; // От внутреннего ядра до поверхности
+                    
+                    sparklePositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+                    sparklePositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+                    sparklePositions[i * 3 + 2] = radius * Math.cos(phi);
+                    
+                    // Разные размеры для мерцания
+                    sparkleSizes[i] = 0.01 + Math.random() * 0.03;
+                  }
+                  
+                  sparklesGeometry.setAttribute('position', new THREE.BufferAttribute(sparklePositions, 3));
+                  sparklesGeometry.setAttribute('size', new THREE.BufferAttribute(sparkleSizes, 1));
+                  
+                  const sparkles = new THREE.Points(
+                    sparklesGeometry,
+                    new THREE.PointsMaterial({
+                      color: new THREE.Color(1, 1, 1), // Белые искры
+                      size: 0.02,
+                      transparent: true,
+                      opacity: 0.7,
+                      blending: THREE.AdditiveBlending,
+                      sizeAttenuation: true,
+                      depthWrite: false
+                    })
+                  );
+                  sparkles.name = 'sparkles';
+                  sparkles.userData.flickerSpeeds = Array(sparkleCount).fill(0).map(() => 2 + Math.random() * 4);
+                  sparkles.userData.flickerPhases = Array(sparkleCount).fill(0).map(() => Math.random() * Math.PI * 2);
+                  cometObj.add(sparkles);
                   
                   // Добавляем свечение
                   const glow = new THREE.PointLight(new THREE.Color(r, g, b), 1.5, 7);
@@ -1229,6 +1294,79 @@ const NeonComets = () => {
                   const colorVariant = new THREE.Color(r, g, b);
                   colorVariant.offsetHSL(hueShift, 0, 0);
                   material.color.copy(colorVariant).multiplyScalar(1.5); // Ярче основного цвета
+                }
+                
+                // Внутреннее глубокое ядро для эффекта параллакса
+                const deepCore = cometObj.children.find(child => child.name === 'deepCore') as THREE.Mesh;
+                if (deepCore) {
+                  const material = deepCore.material as THREE.MeshPhongMaterial;
+                  const pulseFactor = deepCore.userData.pulseFactor || 0.15;
+                  const pulseOffset = deepCore.userData.pulseOffset || 0;
+                  const rotationSpeed = deepCore.userData.rotationSpeed || 0.005;
+                  
+                  // Создаем эффект параллакса через микро-смещения позиции
+                  const parallaxAmplitude = 0.05;
+                  const parallaxX = Math.sin(timeRef.current * 0.7 + pulseOffset) * parallaxAmplitude;
+                  const parallaxY = Math.cos(timeRef.current * 0.5 + pulseOffset) * parallaxAmplitude;
+                  deepCore.position.set(
+                    parallaxX,
+                    parallaxY,
+                    Math.sin(timeRef.current * 0.3) * 0.03 // Меньшее смещение по Z
+                  );
+                  
+                  // Медленно вращаем внутреннее ядро для дополнительного визуального интереса
+                  deepCore.rotation.x += rotationSpeed;
+                  deepCore.rotation.y += rotationSpeed * 0.7;
+                  
+                  // Пульсация интенсивности
+                  const pulseSize = 0.35 + Math.sin(timeRef.current * pulseFactor * 2 + pulseOffset) * 0.1;
+                  deepCore.scale.set(pulseSize, pulseSize, pulseSize);
+                  
+                  // Пульсация прозрачности
+                  material.opacity = opacity * (0.3 + Math.sin(timeRef.current * pulseFactor * 1.5 + pulseOffset) * 0.2);
+                  
+                  // Изменение цвета с более насыщенными оттенками
+                  const deepHueShift = (Math.sin(timeRef.current * 0.2 + id * 2.5) * 0.15) % 1.0;
+                  const deepColorVariant = new THREE.Color(r, g, b);
+                  deepColorVariant.offsetHSL(deepHueShift, 0.2, 0.1);
+                  material.color.copy(deepColorVariant).multiplyScalar(1.8);
+                  
+                  // Изменение блеска для эффекта мерцания
+                  material.shininess = 70 + Math.sin(timeRef.current * 3 + id) * 30;
+                }
+                
+                // Обновляем мерцающие искры
+                const sparkles = cometObj.children.find(child => child.name === 'sparkles') as THREE.Points;
+                if (sparkles) {
+                  const material = sparkles.material as THREE.PointsMaterial;
+                  
+                  // Базовая прозрачность, меняется с общим opacity кометы
+                  material.opacity = opacity * 0.7;
+                  
+                  // Обновляем размер и прозрачность каждой искры по отдельности
+                  const sizes = sparkles.geometry.attributes.size as THREE.BufferAttribute;
+                  const flickerSpeeds = sparkles.userData.flickerSpeeds || [];
+                  const flickerPhases = sparkles.userData.flickerPhases || [];
+                  
+                  for (let i = 0; i < sizes.count; i++) {
+                    const speed = flickerSpeeds[i] || 3;
+                    const phase = flickerPhases[i] || 0;
+                    // Нелинейное мерцание для более реалистичного эффекта
+                    const flicker = Math.pow(0.5 + 0.5 * Math.sin(timeRef.current * speed + phase), 2);
+                    
+                    // Для некоторых искр делаем периодическое исчезновение и появление
+                    const blink = (i % 3 === 0) ? 
+                      (Math.sin(timeRef.current * 1.5 + i) > 0.7 ? 1 : 0.1) : 1;
+                    
+                    // Применяем размер с учетом мерцания
+                    const baseSize = 0.01 + Math.random() * 0.03; // Базовый размер искры
+                    sizes.setX(i, baseSize * flicker * blink);
+                  }
+                  sizes.needsUpdate = true;
+                  
+                  // Легкое вращение всей системы искр для динамического эффекта
+                  sparkles.rotation.x = Math.sin(timeRef.current * 0.3) * 0.1;
+                  sparkles.rotation.y = Math.cos(timeRef.current * 0.2) * 0.1;
                 }
                 
                 // Обновляем свечение
