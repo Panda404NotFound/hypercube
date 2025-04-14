@@ -1146,6 +1146,7 @@ const NeonComets = () => {
                   // Создаем новую комету
                   cometObj = new THREE.Group();
                   cometObj.userData.id = id;
+                  cometObj.userData.birthTime = timeRef.current; // Запоминаем время создания
                   
                   // Создаем ядро кометы с более красивым пульсирующим материалом
                   const core = new THREE.Mesh(
@@ -1254,6 +1255,44 @@ const NeonComets = () => {
                   glow.userData.pulseFactor = 0.15 + Math.random() * 0.2; // Индивидуальная скорость пульсации
                   glow.userData.pulseOffset = Math.random() * Math.PI * 2; // Индивидуальный фазовый сдвиг
                   cometObj.add(glow);
+                  
+                  // Добавляем эффект вспышки при рождении
+                  const birthFlashGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+                  const birthFlashMaterial = new THREE.MeshBasicMaterial({
+                    color: new THREE.Color(1, 1, 1), // Начинаем с белого света
+                    transparent: true,
+                    opacity: 0,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                  });
+                  const birthFlash = new THREE.Mesh(birthFlashGeometry, birthFlashMaterial);
+                  birthFlash.name = 'birthFlash';
+                  birthFlash.scale.set(0.1, 0.1, 0.1);
+                  cometObj.add(birthFlash);
+                  
+                  // Добавляем лучи для вспышки
+                  const rayCount = 6 + Math.floor(Math.random() * 4); // 6-9 лучей
+                  for (let i = 0; i < rayCount; i++) {
+                    const angle = (i / rayCount) * Math.PI * 2;
+                    const rayLength = 0.5 + Math.random() * 0.5;
+                    
+                    const rayGeometry = new THREE.PlaneGeometry(rayLength, 0.02 + Math.random() * 0.03);
+                    const rayMaterial = new THREE.MeshBasicMaterial({
+                      color: new THREE.Color(r * 1.5, g * 1.5, b * 1.5),
+                      transparent: true,
+                      opacity: 0,
+                      blending: THREE.AdditiveBlending,
+                      depthWrite: false,
+                      side: THREE.DoubleSide
+                    });
+                    
+                    const ray = new THREE.Mesh(rayGeometry, rayMaterial);
+                    ray.position.set(Math.cos(angle) * 0.2, Math.sin(angle) * 0.2, 0);
+                    ray.rotation.z = angle;
+                    ray.name = `birthRay_${i}`;
+                    
+                    birthFlash.add(ray);
+                  }
                   
                   // Добавляем комету в группу
                   group.current.add(cometObj);
@@ -1369,6 +1408,111 @@ const NeonComets = () => {
                   sparkles.rotation.y = Math.cos(timeRef.current * 0.2) * 0.1;
                 }
                 
+                // Проверяем, нужно ли анимировать эффект рождения кометы
+                const birthTime = cometObj.userData.birthTime || 0;
+                const age = timeRef.current - birthTime;
+                const birthDuration = 0.6; // Reduced from 1.5 to 0.6 for shorter, more impactful flash
+                
+                // Если комета только родилась - анимируем эффект вспышки
+                if (age < birthDuration) {
+                  // Коэффициент прогресса анимации от 0 до 1
+                  const birthProgress = age / birthDuration;
+                  
+                  // Создаем плавную кривую интенсивности с более резким началом и затуханием
+                  let flashIntensity;
+                  if (birthProgress < 0.1) {
+                    // Очень быстрый взрывной рост в начале - как вспышка новорожденной звезды
+                    flashIntensity = birthProgress / 0.1;
+                  } else {
+                    // Более быстрое затухание с короткими вспышками
+                    flashIntensity = 1.0 - ((birthProgress - 0.1) / 0.9);
+                    // Добавляем небольшие вторичные вспышки для эффекта пульсации
+                    flashIntensity += 0.3 * Math.sin(birthProgress * Math.PI * 6) * Math.pow(1 - birthProgress, 2);
+                  }
+                  
+                  // Усиливаем нелинейность для более естественной вспышки
+                  flashIntensity = Math.pow(flashIntensity, 0.7);
+                  
+                  // Анимируем центральную вспышку
+                  const birthFlash = cometObj.children.find(child => child.name === 'birthFlash') as THREE.Mesh;
+                  if (birthFlash) {
+                    const material = birthFlash.material as THREE.MeshBasicMaterial;
+                    
+                    // Размер вспышки резко увеличивается и затем расширяется еще больше при затухании
+                    const flashSize = 3 + (4 * (1 - Math.pow(flashIntensity, 1.5)));
+                    birthFlash.scale.set(flashSize, flashSize, flashSize);
+                    
+                    // Повышаем максимальную прозрачность вспышки
+                    material.opacity = flashIntensity * 1.2;
+                    
+                    // Изменение цвета от ярко-белого с оттенком синего к цвету кометы
+                    const color = new THREE.Color();
+                    
+                    // В самом начале - белоснежный цвет с голубым оттенком (цвет очень горячей звезды)
+                    if (birthProgress < 0.2) {
+                      // Ярко-белый цвет, почти слепящий - цвет сверхновой звезды
+                      color.setRGB(2.0 + flashIntensity * 1.5, 2.0 + flashIntensity * 1.5, 2.0 + flashIntensity * 1.5);
+                    } else {
+                      // Плавный переход к цвету кометы
+                      color.lerpColors(
+                        new THREE.Color(2.0, 2.0, 2.2), // Ослепительно яркий белый с голубым оттенком
+                        new THREE.Color(r, g, b), // Цвет кометы
+                        (birthProgress - 0.2) / 0.8
+                      );
+                      
+                      // Добавляем яркое свечение в начале
+                      if (birthProgress < 0.3) {
+                        color.multiplyScalar(3.0 - 4 * (birthProgress - 0.2));
+                      }
+                    }
+                    
+                    material.color = color;
+                    
+                    // Анимируем лучи вспышки
+                    birthFlash.children.forEach((child, index) => {
+                      if (child.name.startsWith('birthRay_')) {
+                        const rayMaterial = (child as THREE.Mesh).material as THREE.MeshBasicMaterial;
+                        
+                        // Индивидуальный сдвиг для каждого луча
+                        const offset = index / birthFlash.children.length;
+                        
+                        // Неравномерная прозрачность лучей для более натурального эффекта
+                        const rayFlash = flashIntensity * (1.0 + 0.5 * Math.sin(birthProgress * 20 + offset * 10));
+                        rayMaterial.opacity = rayFlash * 1.0 * (1.0 - index * 0.04);
+                        
+                        // Лучи вытягиваются быстро в начале и затем сохраняют длину
+                        const baseRayLength = birthProgress < 0.15 ? 
+                            birthProgress / 0.15 * 2.0 : 
+                            2.0 + (0.5 * Math.sin(birthProgress * 15 + offset * 5));
+                            
+                        // Лучи слегка колеблются для эффекта турбулентности
+                        const wobble = 1.0 + 0.1 * Math.sin(birthProgress * 25 + offset * 8);
+                        
+                        child.scale.set(baseRayLength * wobble, 1.0 + (1.0 - flashIntensity) * 0.3, 1);
+                        
+                        // Более динамичное вращение лучей с случайной скоростью
+                        const spinSpeed = 0.04 * (1 + index % 3) * (index % 2 === 0 ? 1 : -1);
+                        child.rotation.z += spinSpeed * (1.0 - birthProgress * 0.5);
+                        
+                        // Цвет лучей переходит от яркого белого к цвету кометы
+                        const rayColor = new THREE.Color();
+                        rayColor.lerpColors(
+                          new THREE.Color(3.0, 3.0, 3.0), // Сверхъяркий чисто белый свет
+                          new THREE.Color(r * 1.5, g * 1.5, b * 1.5), // Усиленный цвет кометы
+                          Math.min(1.0, birthProgress * 3)
+                        );
+                        rayMaterial.color = rayColor;
+                      }
+                    });
+                  }
+                } else {
+                  // Скрываем эффект вспышки после завершения анимации
+                  const birthFlash = cometObj.children.find(child => child.name === 'birthFlash') as THREE.Mesh;
+                  if (birthFlash) {
+                    birthFlash.visible = false;
+                  }
+                }
+                
                 // Обновляем свечение
                 const glow = cometObj.children.find(child => child.name === 'glow') as THREE.PointLight;
                 if (glow) {
@@ -1376,16 +1520,54 @@ const NeonComets = () => {
                   const pulseOffset = glow.userData.pulseOffset || 0;
                   
                   // Пульсация интенсивности света
-                  const pulseIntensity = 1.2 + Math.sin(timeRef.current * pulseFactor * 4 + pulseOffset) * 0.8;
-                  glow.intensity = glowIntensity * pulseIntensity;
-                  
-                  // Пульсация дальности освещения
-                  glow.distance = scale * (6 + Math.sin(timeRef.current * pulseFactor * 2.5 + pulseOffset) * 2);
+                  let intensity = glowIntensity * (1.2 + Math.sin(timeRef.current * pulseFactor * 4 + pulseOffset) * 0.8);
+                  let distance = scale * (6 + Math.sin(timeRef.current * pulseFactor * 2.5 + pulseOffset) * 2);
                   
                   // Небольшие изменения цвета для создания мерцания
                   const colorShift = new THREE.Color(r, g, b);
                   colorShift.offsetHSL(Math.sin(timeRef.current * 0.5 + id) * 0.08, 0, 0);
-                  glow.color.copy(colorShift);
+                  
+                  // Усиливаем свечение при рождении
+                  if (age < birthDuration) {
+                    // Более яркая и короткая вспышка света при рождении
+                    let flashIntensity;
+                    if (age / birthDuration < 0.1) {
+                      // Мгновенный ослепительный всплеск
+                      flashIntensity = (age / birthDuration) / 0.1;
+                      flashIntensity = Math.pow(flashIntensity, 0.4); // Делаем начало еще более резким и ярким
+                    } else {
+                      // Быстрое затухание с небольшими повторными вспышками
+                      flashIntensity = 1.0 - (((age / birthDuration) - 0.1) / 0.9);
+                      flashIntensity = Math.pow(flashIntensity, 1.2); // Более быстрое затухание
+                      // Вторичные вспышки - более яркие и частые
+                      flashIntensity += 0.6 * Math.sin(age / birthDuration * Math.PI * 12) * Math.pow(1 - age / birthDuration, 2);
+                    }
+                    
+                    // Значительное усиление эффекта рождения звезды
+                    intensity += flashIntensity * 8.0; // Увеличено до 8.0 для ослепительной яркости
+                    distance += flashIntensity * 12.0;  // Увеличено до 12.0 для большего радиуса свечения
+                    
+                    // Добавляем эффект цветового сдвига при рождении - чисто белый свет переходит к цвету кометы
+                    if (age / birthDuration < 0.3) {
+                      const birthProgress = age / birthDuration / 0.3;
+                      const birthColor = new THREE.Color();
+                      birthColor.lerpColors(
+                        new THREE.Color(2.0, 2.0, 2.0), // Ослепительно яркий чисто белый свет
+                        colorShift,
+                        birthProgress
+                      );
+                      glow.color.copy(birthColor);
+                    }
+                  }
+                  
+                  // Применяем к свету
+                  glow.intensity = intensity;
+                  glow.distance = distance;
+                  
+                  // Применяем цвет, если он не был изменен в эффекте рождения
+                  if (!(age < birthDuration && age / birthDuration < 0.3)) {
+                    glow.color.copy(colorShift);
+                  }
                 }
               }
               
