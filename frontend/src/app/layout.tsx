@@ -2,7 +2,12 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 
-const inter = Inter({ subsets: ["latin"] });
+// Use Inter from Google Fonts instead of local fonts to avoid loading issues
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: "HYPERCUBE - Synth Studio",
@@ -16,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <body className={`${inter.className} bg-black text-white min-h-screen min-w-full p-0 m-0 overflow-hidden`}>
         {children}
       </body>

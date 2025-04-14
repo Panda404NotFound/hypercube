@@ -6,533 +6,260 @@
  * за визуализацию, вся логика движения и физики реализована в WASM модуле.
  */
 
-import React, { useRef, useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useGLTF, Instances, Instance, Trail, PointMaterial } from '@react-three/drei';
 import * as THREE from 'three';
-import { create } from 'zustand';
-import dynamic from 'next/dynamic';
+import { MathUtils } from 'three';
 
-// Обратите внимание: в реальном проекте необходимо импортировать шейдеры
-// Здесь указаны пути, но в Next.js нужно использовать правильные импорты
-// import vertexShader from '../../shaders/neonComet.vert';
-// import fragmentShader from '../../shaders/neonComet.frag';
-// Пока используем встроенные строки для шейдеров
-const vertexShader = `
-  uniform float uTime;
-  uniform float uSpeed;
-  
-  attribute float size;
-  attribute float randomness;
-  attribute float particleIndex;
-  attribute vec3 color;
-  attribute float fadeFactor;
-  
-  varying vec3 vPosition;
-  varying float vParticleIndex;
-  varying float vRandomness;
-  varying vec3 vColor;
-  varying float vFadeFactor;
-  
-  void main() {
-      vPosition = position;
-      vParticleIndex = particleIndex;
-      vRandomness = randomness;
-      vColor = color;
-      vFadeFactor = fadeFactor;
-      
-      vec3 animated = position;
-      
-      // Добавим небольшую анимацию пульсации
-      float pulseFactor = sin(uTime * (1.0 + randomness)) * 0.2 + 1.0;
-      
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(animated, 1.0);
-      
-      // Увеличиваем размер всех частиц и добавляем пульсацию
-      float sizeMultiplier = particleIndex < 0.1 ? 2.0 : 1.0; // Ядро крупнее хвоста
-      gl_PointSize = size * (1.0 - particleIndex * 0.5) * pulseFactor * sizeMultiplier;
-  }
-`;
+// WASM imports - import default initialization function and specific exports
+import wasmInit, { 
+  create_space_object_system,
+  update_space_object_system,
+  spawn_neon_comets,
+  process_neon_comet_spawns,
+  get_visible_neon_comets
+} from '@wasm/hypercube_wasm';
 
-const fragmentShader = `
-  uniform float uTime;
-  uniform vec3 uColorPrimary;
-  uniform vec3 uColorSecondary;
-  uniform float uGlowStrength;
-  
-  varying vec3 vPosition;
-  varying float vParticleIndex;
-  varying float vRandomness;
-  varying vec3 vColor;
-  varying float vFadeFactor;
-  
-  void main() {
-      // Используем переданные с Rust цвета вместо предустановленных
-      vec3 baseColor = vColor;
-      
-      // Усиливаем насыщенность цветов
-      baseColor *= 1.5;
-      
-      // Улучшаем свечение частиц
-      float dist = length(gl_PointCoord - vec2(0.5));
-      float glow = exp(-dist * 3.0) * uGlowStrength; // Экспоненциальное затухание для более яркого центра
-      float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
-      
-      // Для ядра и хвоста разная обработка
-      if (vParticleIndex < 0.1) {
-          // Ядро ярче
-          baseColor *= 1.5;
-          alpha = min(1.0, alpha * 1.5);
-      } else {
-          // Хвост с мерцанием и затуханием на основе fadeFactor
-          alpha *= vFadeFactor; // Используем переданный фактор затухания
-          float flicker = sin(uTime * (5.0 + vRandomness * 10.0)) * 0.3 + 0.7; // Более естественное мерцание
-          alpha *= flicker;
-          
-          // Добавляем дополнительную анимацию цвета для хвоста
-          float colorShift = sin(uTime * 2.0 + vRandomness * 10.0) * 0.3 + 0.5;
-          baseColor = mix(baseColor, vec3(1.0, 1.0, 1.0), colorShift * 0.2); // Периодические вспышки белого
-      }
-      
-      // Добавляем свечение
-      baseColor += glow * 0.7;
-      
-      gl_FragColor = vec4(baseColor, alpha);
-  }
-`;
+interface NeonCometsProps {
+  count?: number;
+  initialDelay?: number;
+  speed?: number;
+  colorPrimary?: string;
+  colorSecondary?: string;
+}
 
-// Упрощенный загрузчик WASM модуля
-const useWasmModule = () => {
-  const [wasmModule, setWasmModule] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+// For better TypeScript compatibility, define an interface for the CometData
+interface CometData {
+  // WASM binding pointer
+  __wbg_ptr?: number;
+}
 
+const NeonComets = ({ count = 15, initialDelay = 0, speed = 1.0, colorPrimary = "#88ccff", colorSecondary = "#ff88cc" }: NeonCometsProps) => {
+  // Создаем ссылку для хранения ID системы космических объектов
+  const systemIdRef = useRef<number | null>(null);
+  const wasmInitializedRef = useRef<boolean>(false);
+  const spawningInProgressRef = useRef<boolean>(false);
+  const cometsSpawnedRef = useRef<boolean>(false);
+  
+  // Инициализация WASM модуля и системы объектов
   useEffect(() => {
     let isMounted = true;
     
-    async function loadWasm() {
-      try {
-        // Динамический импорт WASM модуля
-        const module = await import('../../../../wasm/pkg/hypercube_wasm');
-        await module.default(); // Инициализация модуля
+    // Инициализируем WASM модуль
+    wasmInit()
+      .then(() => {
+        if (!isMounted) return;
         
-        if (isMounted) {
-          // Проверяем наличие необходимых функций для работы с космическими объектами
-          const requiredFunctions = [
-            'create_space_object_system_with_fixed_particles',
-            'update_space_object_system',
-            'get_neon_comet_data'
-          ];
+        wasmInitializedRef.current = true;
+        console.log('WASM module initialized successfully!');
+        
+        // Если система еще не создана, создаем ее
+        if (systemIdRef.current === null) {
+          // Создаем систему объектов с параметрами: viewport_size_percent = 25.0, fov_degrees = 60.0
+          systemIdRef.current = create_space_object_system(25.0, 60.0);
+          console.log('Created space object system with ID:', systemIdRef.current);
           
-          // Проверяем, что все необходимые функции существуют в модуле
-          const missingFunctions: string[] = [];
-          requiredFunctions.forEach(funcName => {
-            if (typeof (module as any)[funcName] !== 'function') {
-              missingFunctions.push(funcName);
+          // Устанавливаем таймаут для начального создания комет
+          spawningInProgressRef.current = true;
+          setTimeout(() => {
+            if (!isMounted || systemIdRef.current === null) return;
+            
+            try {
+              // Try to spawn comets
+              const spawnResult = spawn_neon_comets(systemIdRef.current, count);
+              console.log(`Spawned ${count} comets, result:`, spawnResult);
+              
+              cometsSpawnedRef.current = true;
+            } catch (error) {
+              console.error('Error spawning comets:', error);
+            } finally {
+              spawningInProgressRef.current = false;
             }
-          });
-          
-          if (missingFunctions.length > 0) {
-            throw new Error(`Отсутствуют необходимые функции: ${missingFunctions.join(', ')}`);
-          }
-          
-          console.log('WASM модуль загружен успешно');
-          setWasmModule(module);
-          setIsLoading(false);
+          }, initialDelay);
         }
-      } catch (err) {
-        console.error('Ошибка загрузки WASM модуля:', err);
-        if (isMounted) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-          // Создаем заглушку с необходимыми функциями
-          setWasmModule({
-            create_space_object_system_with_fixed_particles: (count: number, type: number, particlesPerObj: number) => {
-              console.warn(`[ЗАГЛУШКА] Создана система ${count} объектов типа ${type} с ${particlesPerObj} частицами`);
-              return 1;
-            },
-            update_space_object_system: (id: number, deltaTime: number) => {
-              // console.log(`[ЗАГЛУШКА] Обновлена система объектов (ID=${id}) на ${deltaTime.toFixed(3)}с`);
-              return true;
-            },
-            get_neon_comet_data: (id: number) => {
-              // console.log(`[ЗАГЛУШКА] Запрошены данные о кометах для ID=${id}`);
-              return createEmptyCometData();
-            }
-          });
-          setIsLoading(false);
-        }
-      }
-    }
-    
-    loadWasm();
+      })
+      .catch((error: Error) => {
+        console.error("Failed to initialize WASM module:", error);
+      });
     
     return () => {
       isMounted = false;
+      // При размонтировании компонента можно было бы удалить систему,
+      // но это не требуется, так как она удалится вместе с WASM модулем
+      systemIdRef.current = null;
     };
+  }, [count, initialDelay]);
+  
+  // Создаем группы для размещения комет
+  const group = useRef<THREE.Group>(null);
+  
+  // Создаем геометрию для комет
+  const cometGeometry = useMemo(() => {
+    return new THREE.IcosahedronGeometry(1, 1);
   }, []);
-
-  return { wasmModule, isLoading, error };
-};
-
-// Функция для создания пустых данных для заглушки
-function createEmptyCometData(): NeonCometData {
-  return {
-    core_positions: new Float32Array(15),
-    core_rotations: new Float32Array(15),
-    core_scales: new Float32Array(5),
-    core_colors: new Float32Array(15),
-    particle_positions: new Float32Array(300),
-    particle_sizes: new Float32Array(100),
-    particle_lifetimes: new Float32Array(100),
-    particle_max_lifetimes: new Float32Array(100),
-    particle_randomness: new Float32Array(100),
-    particle_colors: new Float32Array(300),
-    particle_fade_factors: new Float32Array(100),
-    particle_count_per_comet: new Uint32Array(5)
-  };
-}
-
-// Тип для данных кометы из WASM
-interface NeonCometData {
-  core_positions: Float32Array;
-  core_rotations: Float32Array;
-  core_scales: Float32Array;
-  core_colors: Float32Array;
-  particle_positions: Float32Array;
-  particle_sizes: Float32Array;
-  particle_lifetimes: Float32Array;
-  particle_max_lifetimes: Float32Array;
-  particle_randomness: Float32Array;
-  particle_colors: Float32Array;
-  particle_fade_factors: Float32Array;
-  particle_count_per_comet: Uint32Array;
-}
-
-// Свойства для компонента неоновых комет
-interface NeonCometsProps {
-  // Эти параметры будут напрямую использоваться только для передачи в WASM
-  count?: number;         // Количество комет (будет передано в WASM)
-  speed?: number;         // Множитель скорости времени (для анимации)
-  // Цвета используются только для визуализации, но не влияют на логику
-  colorPrimary?: string;  // Основной цвет свечения
-  colorSecondary?: string; // Дополнительный цвет свечения
-  // Флаг для отладки - показывать ли траектории движения
-  showPaths?: boolean;
-}
-
-// Состояние, которое будет храниться в хуке useStore
-interface CometState {
-  systemId: number | null;
-  initSystem: (wasm: any, count: number) => void;
-  updateSystem: (wasm: any, deltaTime: number) => void;
-  getCometsData: (wasm: any) => NeonCometData | null;
-}
-
-// Создаем store с помощью zustand для управления состоянием комет
-const useCometsStore = create<CometState>((set, get) => ({
-  systemId: null,
   
-  initSystem: (wasm, count: number) => {
-    if (!wasm) return;
-    
-    try {
-      // Тип 0 соответствует NeonComet в enum SpaceObjectType в wasm/src/space_objects.rs
-      const objectType = 0; // NeonComet
-      
-      // Создаем систему космических объектов с фиксированным количеством частиц
-      // Это гарантирует, что все комета будет иметь одинаковое количество частиц
-      const particlesPerComet = 100; // Определено в WASM модуле (wasm/src/neon_comets.rs)
-      
-      // Вызываем функцию WASM для создания системы комет
-      const systemId = wasm.create_space_object_system_with_fixed_particles(count, objectType, particlesPerComet);
-      
-      console.log(`Создана система комет с ID=${systemId}, частиц на комету: ${particlesPerComet}`);
-      set({ systemId });
-    } catch (error) {
-      console.error("Ошибка инициализации системы комет:", error);
-    }
-  },
+  // Создаем материал для комет
+  const cometMaterial = useMemo(() => {
+    return new THREE.MeshStandardMaterial({
+      metalness: 0.1,
+      roughness: 0.2,
+      emissive: new THREE.Color(colorPrimary),
+      emissiveIntensity: 2.0,
+      transparent: true,
+      side: THREE.DoubleSide,
+    });
+  }, [colorPrimary]);
   
-  updateSystem: (wasm, deltaTime: number) => {
-    if (!wasm) return;
-    
-    const { systemId } = get();
-    if (systemId !== null) {
-      try {
-        // Вызываем функцию WASM для обновления системы комет с учетом прошедшего времени
-        wasm.update_space_object_system(systemId, deltaTime);
-      } catch (error) {
-        console.error("Ошибка обновления системы комет:", error);
-      }
-    }
-  },
-  
-  getCometsData: (wasm) => {
-    if (!wasm) return null;
-    
-    const { systemId } = get();
-    if (systemId !== null) {
-      try {
-        // Получаем данные о положении, размерах и цветах комет из WASM модуля
-        return wasm.get_neon_comet_data(systemId) as NeonCometData;
-      } catch (error) {
-        console.error("Ошибка получения данных о кометах:", error);
-      }
-    }
-    return null;
-  }
-}));
-
-export function NeonComets({ 
-  count = 5, 
-  speed = 1, 
-  colorPrimary = '#00ff83', 
-  colorSecondary = '#0083ff',
-  showPaths = false
-}: NeonCometsProps) {
-  // Загружаем WebAssembly модуль
-  const { wasmModule, isLoading, error } = useWasmModule();
-  
-  // Ссылки на объекты Three.js
-  const cometCoresRef = useRef<THREE.Points>(null);
-  const cometTailsRef = useRef<THREE.Points>(null);
-  
-  // Создаем материалы для визуализации комет
-  const coreMaterial = useMemo(() => {
-    return new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      uniforms: {
-        uTime: { value: 0 },
-        uSpeed: { value: speed },
-        uColorPrimary: { value: new THREE.Color(colorPrimary) },
-        uColorSecondary: { value: new THREE.Color(colorSecondary) },
-        uGlowStrength: { value: 3.0 }
-      },
+  // Создаем геометрию для хвоста кометы
+  const trailMaterial = useMemo(() => {
+    return new THREE.MeshBasicMaterial({
+      color: new THREE.Color(colorSecondary),
       transparent: true,
       blending: THREE.AdditiveBlending,
-      depthWrite: false
+      side: THREE.DoubleSide,
     });
-  }, [colorPrimary, colorSecondary, speed]);
+  }, [colorSecondary]);
   
-  const tailMaterial = useMemo(() => {
-    return new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      uniforms: {
-        uTime: { value: 0 },
-        uSpeed: { value: speed },
-        uColorPrimary: { value: new THREE.Color(colorSecondary) },
-        uColorSecondary: { value: new THREE.Color(colorPrimary) },
-        uGlowStrength: { value: 2.0 }
-      },
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-  }, [colorPrimary, colorSecondary, speed]);
-  
-  // Создаем пустые геометрии для ядер и хвостов комет
-  // Эти буферы будут заполняться данными из WASM модуля
-  const coreGeometry = useMemo(() => {
-    const geometry = new THREE.BufferGeometry();
-    // Создаем атрибуты с запасом для максимально возможного количества ядер
-    const maxCores = count; // Одно ядро на комету
-    
-    // Позиции ядер комет (по 3 координаты на каждое ядро)
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(maxCores * 3), 3));
-    
-    // Размеры ядер комет
-    geometry.setAttribute('size', new THREE.BufferAttribute(new Float32Array(maxCores), 1));
-    
-    // Цвета ядер комет (по 3 компонента цвета на каждое ядро)
-    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(maxCores * 3), 3));
-    
-    // Фактор затухания (для ядер всегда 1.0)
-    geometry.setAttribute('fadeFactor', new THREE.BufferAttribute(new Float32Array(maxCores).fill(1.0), 1));
-    
-    // Индекс типа частицы (0 для ядер)
-    geometry.setAttribute('particleIndex', new THREE.BufferAttribute(new Float32Array(maxCores).fill(0), 1));
-    
-    // Случайность для визуальных эффектов
-    geometry.setAttribute('randomness', new THREE.BufferAttribute(new Float32Array(maxCores).fill(0.5), 1));
-    
-    return geometry;
-  }, [count]);
-  
-  const tailGeometry = useMemo(() => {
-    // Максимальное количество частиц для хвостов всех комет
-    // Рассчитываем с запасом, чтобы точно хватило буфера
-    const maxTailParticles = count * 200; // По 200 частиц на комету с запасом
-    
-    const geometry = new THREE.BufferGeometry();
-    
-    // Позиции частиц хвостов (по 3 координаты на каждую частицу)
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(maxTailParticles * 3), 3));
-    
-    // Размеры частиц хвостов
-    geometry.setAttribute('size', new THREE.BufferAttribute(new Float32Array(maxTailParticles), 1));
-    
-    // Цвета частиц хвостов (по 3 компонента цвета на каждую частицу)
-    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(maxTailParticles * 3), 3));
-    
-    // Фактор затухания для постепенного исчезновения частиц хвоста
-    geometry.setAttribute('fadeFactor', new THREE.BufferAttribute(new Float32Array(maxTailParticles).fill(1.0), 1));
-    
-    // Индекс типа частицы (1 для частиц хвоста)
-    geometry.setAttribute('particleIndex', new THREE.BufferAttribute(new Float32Array(maxTailParticles).fill(1), 1));
-    
-    // Случайность для визуальных эффектов
-    geometry.setAttribute('randomness', new THREE.BufferAttribute(new Float32Array(maxTailParticles), 1));
-    
-    return geometry;
-  }, [count]);
-  
-  // Получаем доступ к состоянию комет через zustand
-  const { initSystem, updateSystem, getCometsData } = useCometsStore();
-  
-  // Инициализация системы комет при загрузке WASM модуля
-  useEffect(() => {
-    if (wasmModule && !isLoading) {
-      // Инициализируем систему комет в WASM-модуле
-      // Все параметры управления будут находиться в WASM
-      initSystem(wasmModule, count);
-    }
-  }, [count, initSystem, wasmModule, isLoading]);
-  
-  // Функция для безопасного обновления буферов визуализации
-  const updateBufferSafely = (
-    targetArray: Float32Array,
-    sourceArray: Float32Array,
-    attributeName: string,
-    attribute: THREE.BufferAttribute
-  ) => {
-    if (targetArray.length >= sourceArray.length) {
-      targetArray.set(sourceArray);
-      attribute.needsUpdate = true;
-      return true;
-    } 
-    
-    // В случае несоответствия размеров буферов выводим предупреждение
-    console.warn(`Несоответствие размера буфера: ${attributeName} имеет ${targetArray.length} элементов, источник имеет ${sourceArray.length}`);
-    return false;
-  };
-  
-  // Обновление визуализации комет на каждом кадре
+  // Обновление и рендеринг комет
   useFrame((state, delta) => {
-    if (!wasmModule || isLoading) return;
-    
-    // Обновляем систему комет в WASM-модуле
-    // Вся логика перемещения, создания новых комет и обработки столкновений
-    // происходит внутри WASM-модуля
-    updateSystem(wasmModule, delta * speed);
-    
-    // Получаем актуальные данные из WASM для визуализации
-    const cometData = getCometsData(wasmModule);
-    if (!cometData) return;
-    
-    // Обновляем время для шейдеров (для анимации свечения)
-    if (coreMaterial.uniforms) {
-      coreMaterial.uniforms.uTime.value = state.clock.elapsedTime;
-    }
-    if (tailMaterial.uniforms) {
-      tailMaterial.uniforms.uTime.value = state.clock.elapsedTime;
-    }
-    
-    // Обновляем визуализацию ядер комет
-    if (cometCoresRef.current) {
-      const posAttribute = cometCoresRef.current.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const sizeAttribute = cometCoresRef.current.geometry.getAttribute('size') as THREE.BufferAttribute;
-      const colorAttribute = cometCoresRef.current.geometry.getAttribute('color') as THREE.BufferAttribute;
+    if (systemIdRef.current !== null && wasmInitializedRef.current) {
+      // Apply speed factor to delta time
+      const adjustedDelta = delta * speed;
       
-      // Обновляем позиции ядер из WASM
-      updateBufferSafely(
-        posAttribute.array as Float32Array,
-        cometData.core_positions,
-        'позиции ядер',
-        posAttribute
-      );
-      
-      // Обновляем размеры ядер из WASM с небольшим увеличением для лучшей видимости
-      const sizes = sizeAttribute.array as Float32Array;
-      const scaleCount = Math.min(count, cometData.core_scales.length);
-      for (let i = 0; i < scaleCount; i++) {
-        sizes[i] = cometData.core_scales[i] * 5.0; // Увеличиваем размер для лучшей видимости
+      try {
+        // Обрабатываем отложенные создания комет
+        if (cometsSpawnedRef.current || spawningInProgressRef.current) {
+          process_neon_comet_spawns(adjustedDelta);
+        }
+        
+        // Обновляем состояние всех комет
+        update_space_object_system(systemIdRef.current, adjustedDelta);
+        
+        // Получаем данные о видимых кометах
+        const cometDataObject = get_visible_neon_comets(systemIdRef.current);
+        
+        // Check if cometsData exists
+        if (cometDataObject && group.current) {
+          // Extract arrays using direct method calls
+          let idsArray: Uint32Array | number[] = [];
+          let positionsArray: Float32Array | number[] = [];
+          let scalesArray: Float32Array | number[] = [];
+          let rotationsArray: Float32Array | number[] = [];
+          let opacitiesArray: Float32Array | number[] = [];
+          let colorsArray: Float32Array | number[] = [];
+          let tailLengthsArray: Float32Array | number[] = [];
+          let glowIntensitiesArray: Float32Array | number[] = [];
+          
+          try {
+            // Access each property as a getter
+            const comet = cometDataObject as any;
+            idsArray = comet.ids;
+            positionsArray = comet.positions;
+            scalesArray = comet.scales;
+            rotationsArray = comet.rotations;
+            opacitiesArray = comet.opacities;
+            colorsArray = comet.colors;
+            tailLengthsArray = comet.tail_lengths;
+            glowIntensitiesArray = comet.glow_intensities;
+
+            // Only proceed if we have valid IDs
+            if (idsArray && idsArray.length > 0) {
+              // Обновляем положение и параметры комет
+              const children = group.current.children;
+              
+              // Для каждой видимой кометы обновляем её визуальное представление
+              // или создаем новую, если её ещё нет
+              for (let i = 0; i < idsArray.length; i++) {
+                const id = idsArray[i];
+                const px = positionsArray[i * 3];
+                const py = positionsArray[i * 3 + 1];
+                const pz = positionsArray[i * 3 + 2];
+                
+                const scale = scalesArray[i];
+                
+                const rx = rotationsArray[i * 4];
+                const ry = rotationsArray[i * 4 + 1];
+                const rz = rotationsArray[i * 4 + 2];
+                const rw = rotationsArray[i * 4 + 3];
+                
+                const opacity = opacitiesArray[i];
+                
+                const r = colorsArray[i * 3];
+                const g = colorsArray[i * 3 + 1];
+                const b = colorsArray[i * 3 + 2];
+                
+                const tailLength = tailLengthsArray[i];
+                const glowIntensity = glowIntensitiesArray[i];
+                
+                // Находим или создаём объект кометы
+                let cometObj = children.find(child => child.userData.id === id) as THREE.Group;
+                
+                if (!cometObj) {
+                  // Создаем новую комету
+                  cometObj = new THREE.Group();
+                  cometObj.userData.id = id;
+                  
+                  // Создаем основное тело кометы
+                  const body = new THREE.Mesh(cometGeometry, cometMaterial.clone());
+                  body.name = 'body';
+                  cometObj.add(body);
+                  
+                  // Добавляем свечение
+                  const glow = new THREE.PointLight(0x88ccff, 2.0, 10);
+                  glow.name = 'glow';
+                  cometObj.add(glow);
+                  
+                  // Добавляем комету в группу
+                  group.current.add(cometObj);
+                }
+                
+                // Обновляем положение и параметры
+                cometObj.position.set(px, py, pz);
+                cometObj.scale.set(scale, scale, scale);
+                cometObj.quaternion.set(rx, ry, rz, rw);
+                
+                // Обновляем материал тела кометы
+                const body = cometObj.children.find(child => child.name === 'body') as THREE.Mesh;
+                if (body) {
+                  const material = body.material as THREE.MeshStandardMaterial;
+                  material.opacity = opacity;
+                  material.emissive.setRGB(r, g, b);
+                  material.color.setRGB(r, g, b);
+                  material.emissiveIntensity = glowIntensity;
+                }
+                
+                // Обновляем свечение
+                const glow = cometObj.children.find(child => child.name === 'glow') as THREE.PointLight;
+                if (glow) {
+                  glow.color.setRGB(r, g, b);
+                  glow.intensity = glowIntensity * 2;
+                  glow.distance = scale * 10 * tailLength;
+                }
+              }
+              
+              // Удаляем кометы, которых нет в данных
+              const visibleIds = new Set(idsArray);
+              for (let i = children.length - 1; i >= 0; i--) {
+                const child = children[i];
+                if (!visibleIds.has(child.userData.id)) {
+                  group.current.remove(child);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error accessing comet data:', error);
+          }
+        }
+      } catch (error) {
+        console.error("Error in WASM operation:", error);
       }
-      sizeAttribute.needsUpdate = true;
-      
-      // Обновляем цвета ядер из WASM
-      updateBufferSafely(
-        colorAttribute.array as Float32Array,
-        cometData.core_colors,
-        'цвета ядер',
-        colorAttribute
-      );
-    }
-    
-    // Обновляем визуализацию хвостов комет
-    if (cometTailsRef.current) {
-      const posAttribute = cometTailsRef.current.geometry.getAttribute('position') as THREE.BufferAttribute;
-      const sizeAttribute = cometTailsRef.current.geometry.getAttribute('size') as THREE.BufferAttribute;
-      const randomnessAttribute = cometTailsRef.current.geometry.getAttribute('randomness') as THREE.BufferAttribute;
-      const particleIndexAttribute = cometTailsRef.current.geometry.getAttribute('particleIndex') as THREE.BufferAttribute;
-      const colorAttribute = cometTailsRef.current.geometry.getAttribute('color') as THREE.BufferAttribute;
-      const fadeFactorAttribute = cometTailsRef.current.geometry.getAttribute('fadeFactor') as THREE.BufferAttribute;
-      
-      // Обновляем все атрибуты частиц хвоста из WASM
-      updateBufferSafely(posAttribute.array as Float32Array, cometData.particle_positions, 'позиции частиц', posAttribute);
-      updateBufferSafely(sizeAttribute.array as Float32Array, cometData.particle_sizes, 'размеры частиц', sizeAttribute);
-      updateBufferSafely(randomnessAttribute.array as Float32Array, cometData.particle_randomness, 'случайность', randomnessAttribute);
-      updateBufferSafely(colorAttribute.array as Float32Array, cometData.particle_colors, 'цвета частиц', colorAttribute);
-      updateBufferSafely(fadeFactorAttribute.array as Float32Array, cometData.particle_fade_factors, 'затухание', fadeFactorAttribute);
-      
-      // Обновляем индекс частицы на основе времени жизни из WASM
-      const indices = particleIndexAttribute.array as Float32Array;
-      const maxLength = Math.min(indices.length, cometData.particle_lifetimes.length, cometData.particle_max_lifetimes.length);
-      
-      for (let i = 0; i < maxLength; i++) {
-        // Устанавливаем значение от 0.1 до 1.0 в зависимости от времени жизни
-        // Это влияет на визуализацию частиц в шейдере
-        indices[i] = 0.1 + 0.9 * (1.0 - cometData.particle_lifetimes[i] / cometData.particle_max_lifetimes[i]);
-      }
-      particleIndexAttribute.needsUpdate = true;
     }
   });
-
-  // Если произошла ошибка загрузки WASM-модуля, показываем сообщение об ошибке
-  if (error) {
-    console.error('Ошибка инициализации WASM модуля:', error);
-    return (
-      <group>
-        <mesh>
-          <sphereGeometry args={[0.5, 16, 16]} />
-          <meshBasicMaterial color={colorPrimary} wireframe={true} />
-        </mesh>
-      </group>
-    );
-  }
-
-  // Если WASM модуль всё ещё загружается, не показываем ничего
-  if (isLoading) {
-    return null;
-  }
-
+  
   return (
-    <group>
-      {/* Визуализация ядер комет */}
-      <points ref={cometCoresRef} geometry={coreGeometry} material={coreMaterial} />
-      
-      {/* Визуализация хвостов комет */}
-      <points ref={cometTailsRef} geometry={tailGeometry} material={tailMaterial} />
-      
-      {/* Опционально отображаем траектории движения для отладки */}
-      {showPaths && (
-        <group>
-          <gridHelper args={[20, 20, '#444444', '#222222']} position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]} />
-          <axesHelper args={[5]} />
-        </group>
-      )}
-    </group>
+    <group ref={group} />
   );
-}
+};
 
-export default NeonComets; 
+export default NeonComets;

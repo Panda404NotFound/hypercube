@@ -6,6 +6,7 @@ const nextConfig = {
     config.experiments = {
       ...config.experiments,
       asyncWebAssembly: true,
+      syncWebAssembly: true,
     };
 
     // Add support for glsl shader files
@@ -14,6 +15,12 @@ const nextConfig = {
       exclude: /node_modules/,
       use: ['raw-loader', 'glslify-loader'],
     });
+
+    // Add alias for WASM modules
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@wasm/hypercube_wasm': require.resolve('../wasm/pkg'),
+    };
 
     return config;
   },

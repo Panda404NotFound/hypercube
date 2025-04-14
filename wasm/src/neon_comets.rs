@@ -1,283 +1,450 @@
 use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
-use web_sys::console;
-use crate::space_objects::{SpaceObject, SpaceObjectType};
-use crate::objective_main::{get_viewing_plane_id, Intersection, IntersectionType};
-use rand::Rng;
+use glam::{Vec3, Quat};
+use rand::{Rng, rngs::StdRng};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
+use std::any::Any;
+use web_sys::console;
 
-// Хранилище эффектов взаимодействия комет с просмотровой плоскостью
-pub static COMET_EFFECTS: Lazy<Mutex<Vec<CometEffect>>> = 
-    Lazy::new(|| Mutex::new(Vec::new()));
+use crate::space_core::SpaceDefinition;
+use crate::space_objects::{
+    SpaceObject, SpaceObjectData, SpaceObjectType,
+    random_position_on_far_plane, random_trajectory_through_viewport,
+    SPACE_OBJECT_SYSTEMS
+};
 
-// Эффекты при прохождении кометы через плоскость
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CometEffect {
-    pub position: [f32; 3],        // Позиция эффекта
-    pub color: [f32; 4],           // Цвет эффекта
-    pub radius: f32,               // Радиус эффекта
-    pub lifetime: f32,             // Продолжительность эффекта
-    pub current_age: f32,          // Текущий возраст эффекта
-    pub intensity: f32,            // Интенсивность эффекта
-    pub effect_type: CometEffectType, // Тип эффекта
-}
+// Константы для неоновых комет
+const MIN_COMET_SIZE_PERCENT: f32 = 3.0;   // Минимальный размер кометы (% от пространства)
+const MAX_COMET_SIZE_PERCENT: f32 = 27.0;  // Максимальный размер кометы (% от пространства)
+const COMET_LIFETIME_AFTER_PASS: f32 = 10.0; // Время жизни после прохождения через наблюдателя (в %)
+const MAX_COMET_LIFETIME: f32 = 60.0;      // Максимальное время жизни в секундах
 
-// Типы эффектов комет
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum CometEffectType {
-    Ripple,     // Волновой эффект
-    Explosion,  // Взрывной эффект
-    Glow,       // Свечение
-    Distortion, // Искажение пространства
-}
-
-// Структура для хранения данных о неоновой комете
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NeonCometData {
-    pub id: usize,
-    pub position: [f32; 3],
-    pub velocity: [f32; 3],
-    pub size: f32,
-    pub color: [f32; 4],
-    pub tail_particles: Vec<[f32; 3]>,
-    pub particle_sizes: Vec<f32>,
-    pub particle_colors: Vec<[f32; 4]>,
-    pub distance_to_plane: f32,    // Расстояние до просмотровой плоскости
-    pub has_crossed_plane: bool,   // Пересекла ли комета плоскость на этом шаге
-}
-
-// Структура для батчевой передачи данных комет в JavaScript
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NeonCometDataBatch {
-    pub core_positions: Vec<f32>,
-    pub core_rotations: Vec<f32>,
-    pub core_scales: Vec<f32>,
-    pub core_colors: Vec<f32>,
-    pub particle_positions: Vec<f32>,
-    pub particle_sizes: Vec<f32>,
-    pub particle_lifetimes: Vec<f32>,
-    pub particle_max_lifetimes: Vec<f32>,
-    pub particle_randomness: Vec<f32>,
-    pub particle_colors: Vec<f32>,
-    pub particle_fade_factors: Vec<f32>,
-    pub particle_count_per_comet: Vec<u32>,
-}
-
-// Функция для логирования в консоль
-fn log(message: &str) {
-    console::log_1(&JsValue::from_str(message));
-}
-
-// Получить данные о неоновых кометах из массива объектов
-pub fn get_neon_comet_data_from_objects(objects: &[SpaceObject]) -> NeonCometDataBatch {
-    // Using underscore prefix for unused variables
-    let _viewing_plane_id = get_viewing_plane_id();
+/// Структура данных неоновой кометы
+#[derive(Clone, Debug)]
+pub struct NeonComet {
+    // Основные данные объекта
+    data: SpaceObjectData,
     
-    // Определяем максимальное количество частиц на одну комету для буферизации
-    const MAX_PARTICLES_PER_COMET: usize = 200;
+    // Длина хвоста кометы (в процентах от размера кометы)
+    tail_length: f32,
     
-    // Счетчики для определения размеров буферов
-    let mut active_comets = 0;
-    let mut _total_particles = 0;
+    // Цвет кометы (RGB, каждый компонент от 0.0 до 1.0)
+    color: [f32; 3],
     
-    // Сначала проходим по всем объектам для подсчета активных комет и частиц
-    for object in objects {
-        if !object.is_active || object.object_type != SpaceObjectType::NeonComet {
-            continue;
-        }
-        
-        // Учитываем объекты с отрицательным возрастом, но не обрабатываем их
-        if object.age < 0.0 {
-            // Подсчитываем как активные, но не добавляем частицы
-            active_comets += 1;
-            continue;
-        }
-        
-        active_comets += 1;
-        
-        // Подсчитываем количество частиц хвоста
-        if let Some(tail_particles) = &object.tail_particles {
-            _total_particles += tail_particles.len();
-        }
-    }
+    // Яркость свечения кометы
+    glow_intensity: f32,
     
-    // Если нет активных комет, возвращаем пустые буферы с минимальным размером
-    if active_comets == 0 {
-        return NeonCometDataBatch {
-            core_positions: Vec::new(),
-            core_rotations: Vec::new(),
-            core_scales: Vec::new(),
-            core_colors: Vec::new(),
-            particle_positions: Vec::new(),
-            particle_sizes: Vec::new(),
-            particle_lifetimes: Vec::new(),
-            particle_max_lifetimes: Vec::new(),
-            particle_randomness: Vec::new(),
-            particle_colors: Vec::new(),
-            particle_fade_factors: Vec::new(),
-            particle_count_per_comet: Vec::new(),
+    // Флаг, указывающий, что комета прошла через наблюдателя
+    passed_through: bool,
+}
+
+impl NeonComet {
+    pub fn new(id: usize) -> Self {
+        // Создаем базовые данные
+        let data = SpaceObjectData {
+            id,
+            object_type: SpaceObjectType::NeonComet,
+            position: Vec3::ZERO,
+            size: 0.0,  // Начальный размер 0
+            scale: 0.0,
+            opacity: 0.0,
+            rotation: Quat::IDENTITY,
+            velocity: Vec3::ZERO,
+            lifetime: 0.0,
+            max_lifetime: MAX_COMET_LIFETIME,
+            active: true,
         };
+        
+        Self {
+            data,
+            tail_length: 0.0,
+            color: [0.0, 0.0, 0.0],
+            glow_intensity: 0.0,
+            passed_through: false,
+        }
     }
     
-    // Создаем буферы для ядер комет
-    let mut core_positions: Vec<f32> = Vec::with_capacity(active_comets * 3); // xyz для каждого ядра
-    let mut core_rotations: Vec<f32> = Vec::with_capacity(active_comets * 3); // xyz вращений
-    let mut core_scales: Vec<f32> = Vec::with_capacity(active_comets);
-    let mut core_colors: Vec<f32> = Vec::with_capacity(active_comets * 4); // rgba для каждого ядра
-    
-    // Создаем буферы для частиц хвостов
-    let max_total_particles = active_comets * MAX_PARTICLES_PER_COMET;
-    let mut particle_positions: Vec<f32> = Vec::with_capacity(max_total_particles * 3);
-    let mut particle_sizes: Vec<f32> = Vec::with_capacity(max_total_particles);
-    let mut particle_lifetimes: Vec<f32> = Vec::with_capacity(max_total_particles);
-    let mut particle_max_lifetimes: Vec<f32> = Vec::with_capacity(max_total_particles);
-    let mut particle_randomness: Vec<f32> = Vec::with_capacity(max_total_particles);
-    let mut particle_colors: Vec<f32> = Vec::with_capacity(max_total_particles * 3); // rgb для каждой частицы
-    let mut particle_fade_factors: Vec<f32> = Vec::with_capacity(max_total_particles);
-    
-    // Количество частиц для каждой кометы
-    let mut particle_count_per_comet: Vec<u32> = Vec::with_capacity(active_comets);
-    
-    // Теперь проходим по всем объектам для заполнения буферов
-    for object in objects {
-        if !object.is_active || object.object_type != SpaceObjectType::NeonComet {
-            continue;
-        }
-        
-        // Пропускаем объекты, которые еще не "родились"
-        if object.age < 0.0 {
-            // Добавляем пустую запись для этой кометы
-            core_positions.extend_from_slice(&[0.0, 0.0, -200.0]); // Далеко за пределами видимости
-            core_rotations.extend_from_slice(&[0.0, 0.0, 0.0]);
-            core_scales.push(0.0);
-            core_colors.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]); // Полностью прозрачный
-            particle_count_per_comet.push(0);
-            continue;
-        }
-        
-        // Добавляем данные ядра в буферы
-        core_positions.extend_from_slice(&object.position);
-        core_rotations.extend_from_slice(&object.rotation);
-        core_scales.push(object.size);
-        core_colors.extend_from_slice(&object.color);
-        
-        // Подсчет частиц для этой кометы
-        let mut particle_count = 0;
-        
-        // Добавляем данные о хвосте, если они есть
-        if let Some(tail_particles) = &object.tail_particles {
-            for particle in tail_particles {
-                // Добавляем данные о позиции частицы
-                particle_positions.extend_from_slice(&particle.position);
-                
-                // Добавляем размер частицы
-                particle_sizes.push(particle.size);
-                
-                // Добавляем время жизни
-                particle_lifetimes.push(particle.lifetime);
-                particle_max_lifetimes.push(particle.max_lifetime);
-                
-                // Добавляем случайность
-                particle_randomness.push(particle.randomness);
-                
-                // Добавляем цвет
-                particle_colors.extend_from_slice(&particle.color);
-                
-                // Добавляем фактор затухания
-                particle_fade_factors.push(particle.fade_factor);
-                
-                // Увеличиваем счетчик частиц
-                particle_count += 1;
-            }
-        }
-        
-        // Записываем количество частиц для этой кометы
-        particle_count_per_comet.push(particle_count as u32);
+    // Получить цвет кометы
+    pub fn get_color(&self) -> Vec<f32> {
+        self.color.to_vec()
     }
     
-    // Преобразуем векторы в Fixed32Array для передачи в JavaScript
-    NeonCometDataBatch {
-        core_positions: core_positions,
-        core_rotations: core_rotations,
-        core_scales: core_scales,
-        core_colors: core_colors,
-        particle_positions: particle_positions,
-        particle_sizes: particle_sizes,
-        particle_lifetimes: particle_lifetimes,
-        particle_max_lifetimes: particle_max_lifetimes,
-        particle_randomness: particle_randomness,
-        particle_colors: particle_colors,
-        particle_fade_factors: particle_fade_factors,
-        particle_count_per_comet: particle_count_per_comet,
+    // Получить длину хвоста
+    pub fn get_tail_length(&self) -> f32 {
+        self.tail_length
+    }
+    
+    // Получить интенсивность свечения
+    pub fn get_glow_intensity(&self) -> f32 {
+        self.glow_intensity
     }
 }
 
-// Создать эффект в точке пересечения кометы с плоскостью
-pub fn create_comet_effect_at_intersection(intersection: &Intersection, object: &SpaceObject) {
-    let mut rng = rand::thread_rng();
-    
-    // Определяем тип эффекта на основе типа пересечения
-    let effect_type = match intersection.intersection_type {
-        IntersectionType::Entry => CometEffectType::Ripple,
-        IntersectionType::Exit => CometEffectType::Glow,
-        _ => CometEffectType::Distortion,
-    };
-    
-    // Создаем эффект
-    let effect = CometEffect {
-        position: intersection.position,
-        color: object.color,
-        radius: object.size * 2.0 + rng.gen_range(0.5..1.5),
-        lifetime: rng.gen_range(0.5..1.5),
-        current_age: 0.0,
-        intensity: rng.gen_range(0.7..1.0),
-        effect_type,
-    };
-    
-    // Добавляем эффект в глобальное хранилище
-    if let Ok(mut effects) = COMET_EFFECTS.lock() {
-        effects.push(effect);
-        
-        // Ограничиваем количество эффектов
-        if effects.len() > 20 {
-            effects.remove(0);
-        }
+impl SpaceObject for NeonComet {
+    fn get_data(&self) -> &SpaceObjectData {
+        &self.data
     }
     
-    log(&format!("Comet {} crossed the viewing plane!", object.id));
-}
-
-// Обновить эффекты комет
-#[wasm_bindgen]
-pub fn update_comet_effects(delta_time: f32) -> JsValue {
-    if let Ok(mut effects) = COMET_EFFECTS.lock() {
-        // Обновляем возраст каждого эффекта
-        let mut i = 0;
-        while i < effects.len() {
-            effects[i].current_age += delta_time;
+    fn get_data_mut(&mut self) -> &mut SpaceObjectData {
+        &mut self.data
+    }
+    
+    fn initialize_random(&mut self, rng: &mut StdRng, space: &SpaceDefinition) {
+        // Генерируем случайную позицию на дальней плоскости
+        let position = random_position_on_far_plane(rng, space);
+        
+        // Устанавливаем начальную позицию
+        self.data.position = position;
+        
+        // Генерируем случайный размер от MIN до MAX
+        let size = rng.gen_range(MIN_COMET_SIZE_PERCENT..MAX_COMET_SIZE_PERCENT);
+        self.data.size = size;
+        
+        // Начальный масштаб очень маленький (комета "зарождается")
+        // Ensure scale is not too small to be visible
+        self.data.scale = 0.05;
+        
+        // Начальная прозрачность - делаем выше, чтобы было видно при появлении
+        self.data.opacity = 0.5;
+        
+        // Генерируем случайное вращение
+        let rot_x = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
+        let rot_y = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
+        let rot_z = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
+        self.data.rotation = Quat::from_euler(
+            glam::EulerRot::XYZ,
+            rot_x, rot_y, rot_z
+        );
+        
+        // Генерируем траекторию движения через видовой экран
+        // Make sure speed is sufficient to be noticeable
+        let trajectory = random_trajectory_through_viewport(rng, position, space);
+        self.data.velocity = trajectory * 1.5; // Increase the velocity by 50%
+        
+        // Устанавливаем время жизни
+        self.data.lifetime = 0.0;
+        self.data.max_lifetime = MAX_COMET_LIFETIME;
+        
+        // Генерируем случайную длину хвоста
+        self.tail_length = rng.gen_range(1.5..4.0); // Коэффициент относительно размера кометы
+        
+        // Генерируем случайный цвет из палитры неоновых цветов
+        let neon_colors = [
+            [0.0, 0.8, 1.0],   // Голубой неон
+            [1.0, 0.0, 0.8],   // Розовый неон
+            [0.5, 1.0, 0.0],   // Лаймовый неон
+            [0.9, 0.4, 1.0],   // Фиолетовый неон
+            [1.0, 0.8, 0.0],   // Золотой неон
+        ];
+        
+        self.color = neon_colors[rng.gen_range(0..neon_colors.len())];
+        
+        // Устанавливаем яркость свечения - делаем выше для лучшей видимости
+        self.glow_intensity = rng.gen_range(1.0..1.8);
+        
+        // Активируем объект
+        self.data.active = true;
+        self.passed_through = false;
+    }
+    
+    fn update(&mut self, dt: f32, space: &SpaceDefinition) -> bool {
+        // Обновляем время жизни
+        self.data.lifetime += dt;
+        
+        // Проверяем, не превышено ли максимальное время жизни
+        if self.data.lifetime > self.data.max_lifetime {
+            return false; // Объект деактивируется
+        }
+        
+        // Обновляем позицию на основе скорости
+        self.data.position += self.data.velocity * dt;
+        
+        // Медленное вращение кометы
+        let rot_speed = 0.1 * dt;
+        let rotation_delta = Quat::from_euler(
+            glam::EulerRot::XYZ,
+            rot_speed, rot_speed * 0.7, rot_speed * 0.3
+        );
+        self.data.rotation = self.data.rotation * rotation_delta;
+        
+        // Обновляем масштаб на основе расстояния до наблюдателя
+        let scale_factor = space.get_scale_factor(&self.data.position);
+        // Экспоненциальный рост размера по мере приближения
+        self.data.scale = scale_factor.powf(1.5) * (self.data.size / 100.0);
+        
+        // Ensure minimum scale is visible
+        if self.data.scale < 0.05 {
+            self.data.scale = 0.05;
+        }
+        
+        // Обновляем прозрачность на основе расстояния до наблюдателя
+        self.data.opacity = space.get_transparency_factor(&self.data.position);
+        
+        // Ensure minimum opacity for visibility
+        if self.data.opacity < 0.3 {
+            self.data.opacity = 0.3;
+        }
+        
+        // Проверяем, прошла ли комета через плоскость наблюдателя
+        if self.data.position.z < 0.0 && !self.passed_through {
+            self.passed_through = true;
             
-            // Если эффект истек, удаляем его
-            if effects[i].current_age >= effects[i].lifetime {
-                effects.remove(i);
-            } else {
-                i += 1;
+            // Рассчитываем оставшееся время жизни
+            let remaining_percent = COMET_LIFETIME_AFTER_PASS / 100.0;
+            let remaining_distance = space.min_z.abs() * remaining_percent;
+            
+            // Расчет времени до прохождения оставшегося расстояния
+            let speed_z = self.data.velocity.z.abs();
+            if speed_z > 0.0 {
+                // Установим максимальное время жизни так, чтобы комета исчезла
+                // после прохождения указанного процента пути
+                let time_to_disappear = remaining_distance / speed_z;
+                self.data.max_lifetime = self.data.lifetime + time_to_disappear;
             }
         }
         
-        // Возвращаем актуальный список эффектов
-        return serde_wasm_bindgen::to_value(&*effects).unwrap_or(JsValue::NULL);
+        // Яркость свечения пульсирует со временем
+        let pulse_factor = (self.data.lifetime * 2.0).sin() * 0.2 + 0.8;
+        self.glow_intensity = self.glow_intensity * pulse_factor;
+        
+        // Объект остается активным
+        true
     }
     
-    JsValue::NULL
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
-// Получить активные эффекты комет
+// Хранилище для отложенного создания комет
+static PENDING_COMETS: Lazy<Mutex<Vec<(usize, f32)>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
 #[wasm_bindgen]
-pub fn get_comet_effects() -> JsValue {
-    if let Ok(effects) = COMET_EFFECTS.lock() {
-        return serde_wasm_bindgen::to_value(&*effects).unwrap_or(JsValue::NULL);
+pub fn spawn_neon_comets(system_id: usize, count: usize) -> bool {
+    let mut systems = SPACE_OBJECT_SYSTEMS.lock().unwrap();
+    
+    if let Some(system) = systems.get_mut(&system_id) {
+        // Создаем случайное время задержки для каждой кометы
+        let mut pending = PENDING_COMETS.lock().unwrap();
+        
+        for _ in 0..count {
+            let delay = system.get_rng_mut().gen_range(0.0..5.0); // Случайная задержка до 5 секунд
+            pending.push((system_id, delay));
+        }
+        
+        true
+    } else {
+        false
+    }
+}
+
+#[wasm_bindgen]
+pub fn process_neon_comet_spawns(dt: f32) -> usize {
+    let mut spawned = 0;
+    let mut pending = PENDING_COMETS.lock().unwrap();
+    
+    // Process the delays and gather system IDs that need new comets
+    let mut systems_to_spawn: Vec<usize> = Vec::new();
+    
+    pending.retain_mut(|(system_id, delay)| {
+        *delay -= dt;
+        
+        if *delay <= 0.0 {
+            systems_to_spawn.push(*system_id);
+            false // Remove from pending list
+        } else {
+            true // Keep in pending list
+        }
+    });
+    
+    // Now create comets for each system
+    for system_id in systems_to_spawn {
+        if let Ok(mut systems) = SPACE_OBJECT_SYSTEMS.lock() {
+            if let Some(system) = systems.get_mut(&system_id) {
+                // Get the next ID
+                let comet_id = system.next_id;
+                system.next_id += 1;
+                
+                // Clone the space definition to avoid borrowing conflicts
+                let space_definition = system.space.clone();
+                
+                // Create a new comet
+                let mut comet = NeonComet::new(comet_id);
+                
+                // Initialize the comet with random properties
+                comet.initialize_random(system.get_rng_mut(), &space_definition);
+                
+                // Add the comet to the system
+                system.get_objects_mut()
+                      .entry(SpaceObjectType::NeonComet)
+                      .or_insert_with(Vec::new)
+                      .push(Box::new(comet));
+                
+                spawned += 1;
+                
+                // Print debug information
+                console::log_1(&format!("Created comet with ID: {} at far plane", comet_id).into());
+            }
+        }
     }
     
-    JsValue::NULL
+    spawned
+}
+
+#[wasm_bindgen]
+pub fn get_active_neon_comets_count(system_id: usize) -> usize {
+    let systems = SPACE_OBJECT_SYSTEMS.lock().unwrap();
+    
+    if let Some(system) = systems.get(&system_id) {
+        let objects = system.get_objects();
+        if let Some(comets) = objects.get(&SpaceObjectType::NeonComet) {
+            return comets.len();
+        }
+    }
+    
+    0
+}
+
+// Структура для передачи данных о нескольких кометах в JavaScript
+#[wasm_bindgen]
+pub struct CometDataArray {
+    ids: Vec<usize>,
+    positions: Vec<f32>,
+    scales: Vec<f32>,
+    rotations: Vec<f32>,
+    opacities: Vec<f32>,
+    colors: Vec<f32>,
+    tail_lengths: Vec<f32>,
+    glow_intensities: Vec<f32>,
+}
+
+#[wasm_bindgen]
+impl CometDataArray {
+    // Provide both getter methods and direct access for maximum compatibility
+    #[wasm_bindgen(getter)]
+    pub fn ids(&self) -> Vec<usize> {
+        self.ids.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn positions(&self) -> Vec<f32> {
+        self.positions.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn scales(&self) -> Vec<f32> {
+        self.scales.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn rotations(&self) -> Vec<f32> {
+        self.rotations.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn opacities(&self) -> Vec<f32> {
+        self.opacities.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn colors(&self) -> Vec<f32> {
+        self.colors.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn tail_lengths(&self) -> Vec<f32> {
+        self.tail_lengths.clone()
+    }
+    
+    #[wasm_bindgen(getter)]
+    pub fn glow_intensities(&self) -> Vec<f32> {
+        self.glow_intensities.clone()
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_visible_neon_comets(system_id: usize) -> Option<CometDataArray> {
+    let systems = SPACE_OBJECT_SYSTEMS.lock().unwrap();
+    
+    if let Some(system) = systems.get(&system_id) {
+        let objects = system.get_objects();
+        if let Some(comets) = objects.get(&SpaceObjectType::NeonComet) {
+            let mut data = CometDataArray {
+                ids: Vec::with_capacity(comets.len()),
+                positions: Vec::with_capacity(comets.len() * 3),
+                scales: Vec::with_capacity(comets.len()),
+                rotations: Vec::with_capacity(comets.len() * 4),
+                opacities: Vec::with_capacity(comets.len()),
+                colors: Vec::with_capacity(comets.len() * 3),
+                tail_lengths: Vec::with_capacity(comets.len()),
+                glow_intensities: Vec::with_capacity(comets.len()),
+            };
+            
+            let mut visible_count = 0;
+            
+            for comet in comets.iter() {
+                // Always consider comets as visible during development for debugging
+                #[cfg(debug_assertions)]
+                let is_visible = true;
+                
+                // In release mode, use the normal visibility check
+                #[cfg(not(debug_assertions))]
+                let is_visible = comet.is_visible(&system.space);
+                
+                if is_visible {
+                    let comet_data = comet.get_data();
+                    visible_count += 1;
+                    
+                    // ID
+                    data.ids.push(comet_data.id);
+                    
+                    // Позиция
+                    data.positions.push(comet_data.position.x);
+                    data.positions.push(comet_data.position.y);
+                    data.positions.push(comet_data.position.z);
+                    
+                    // Масштаб
+                    data.scales.push(comet_data.scale);
+                    
+                    // Поворот (как кватернион)
+                    data.rotations.push(comet_data.rotation.x);
+                    data.rotations.push(comet_data.rotation.y);
+                    data.rotations.push(comet_data.rotation.z);
+                    data.rotations.push(comet_data.rotation.w);
+                    
+                    // Прозрачность
+                    data.opacities.push(comet_data.opacity);
+                    
+                    // Специфичные для комет данные
+                    let comet = comet.as_any().downcast_ref::<NeonComet>().unwrap();
+                    
+                    // Цвет
+                    data.colors.extend_from_slice(&comet.color);
+                    
+                    // Длина хвоста
+                    data.tail_lengths.push(comet.tail_length);
+                    
+                    // Интенсивность свечения
+                    data.glow_intensities.push(comet.glow_intensity);
+                }
+            }
+            
+            // Log the count of visible comets for debugging
+            console::log_1(&format!("Found {} visible comets out of {} total", visible_count, comets.len()).into());
+            
+            // Even if there are no visible comets, still return the empty array structure
+            // to avoid null pointer issues in JavaScript
+            return Some(data);
+        } else {
+            console::log_1(&"No comet objects found in the system".into());
+        }
+    } else {
+        console::log_1(&format!("System with ID {} not found", system_id).into());
+    }
+    
+    None
 }

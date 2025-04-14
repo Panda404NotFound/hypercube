@@ -1,8 +1,27 @@
 'use client';
 
-import React, { Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { Suspense, useEffect, useRef } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import { NeonComets } from '../../components/space-objects';
+import { OrbitControls } from '@react-three/drei';
+
+// CameraController component to adjust the camera on mount
+function CameraController() {
+  const { camera, scene } = useThree();
+  
+  useEffect(() => {
+    // Position the camera to look at the negative Z direction
+    // This way we'll see comets coming toward us rather than flying away
+    camera.position.set(0, 0, -25);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+    
+    // Log the camera position to confirm it's set correctly
+    console.log('Camera positioned at:', camera.position);
+  }, [camera, scene]);
+  
+  return null;
+}
 
 // Компонент для отображения космических объектов в 3D-сцене
 export default function SpaceScene() {
@@ -19,8 +38,8 @@ export default function SpaceScene() {
         pointerEvents: 'none' // Позволяет кликать на элементы под канвасом
       }}
       camera={{ 
-        position: [0, 0, 10], // Отодвигаем камеру дальше
-        fov: 75,              // Увеличиваем угол обзора
+        position: [0, 0, -25], // Position camera on negative Z axis
+        fov: 60,              // Use a more standard field of view
         near: 0.1,
         far: 1000
       }}
@@ -29,8 +48,12 @@ export default function SpaceScene() {
         alpha: true
       }}
     >
-      {/* Для отладки - добавляем оси координат */}
-      {/* <axesHelper args={[5]} /> */}
+      
+      {/* OrbitControls to allow camera movement */}
+      <OrbitControls enableZoom={true} enablePan={true} enableRotate={true} />
+      
+      {/* Camera controller for initial positioning */}
+      <CameraController />
       
       <Suspense fallback={null}>
         {/* Неоновые кометы - увеличиваем количество и скорость */}
@@ -48,10 +71,10 @@ export default function SpaceScene() {
         {/* <EnergySpheres count={3} /> */}
       </Suspense>
       
-      {/* Усиливаем освещение для лучшей видимости */}
-      <ambientLight intensity={0.3} />
-      <pointLight position={[0, 0, 10]} intensity={1.0} />
-      <pointLight position={[10, 10, 10]} intensity={0.8} />
+      {/* Enhanced lighting for better visibility */}
+      <ambientLight intensity={0.5} />
+      <pointLight position={[0, 0, 10]} intensity={1.5} />
+      <pointLight position={[10, 10, 10]} intensity={1.2} />
     </Canvas>
   );
 } 
