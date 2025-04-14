@@ -50,6 +50,9 @@ hypercube/
 │   │   ├── physics.rs         # Physics simulation using Rapier
 │   │   ├── particles.rs       # Particle system implementation
 │   │   ├── hypercube.rs       # Hypercube geometry calculations
+│   │   ├── space_objects.rs   # Space objects definitions and behaviors
+│   │   ├── objective_main.rs  # Spatial system core with planes and cubes
+│   │   ├── neon_comets.rs     # Neon comet object implementation
 │   │   └── utils.rs           # Utility functions
 │   ├── pkg/                   # Compiled WebAssembly output
 │   └── Cargo.toml             # Rust dependencies and configuration
@@ -96,11 +99,39 @@ hypercube/
 | Rust | >= 1.84.0 | Systems programming language for WebAssembly compilation |
 | wasm-bindgen | 0.2.92 | Facilitates high-level interactions between Rust and JavaScript |
 | Rapier3D | 0.18.0 | Physics engine for 3D simulations |
+| glam | 0.25.0 | High-performance math library for computer graphics |
 | nalgebra | 0.32.4 | Linear algebra library for graphics and physics calculations |
+| parry3d | 0.13.5 | Collision detection and proximity queries |
+| bevy_math | 0.11.3 | Mathematics utilities from Bevy for 3D operations |
+| noise | 0.8.2 | Library for Perlin, Simplex and other noise algorithms |
 | rand | 0.8.5 | Random number generation |
 | serde | 1.0.197 | Serialization/deserialization framework |
 | web-sys | 0.3.64 | Bindings for Web APIs |
 | js-sys | 0.3.69 | Bindings for JavaScript's standard library |
+
+## Spatial System Architecture
+
+HYPERCUBE implements a revolutionary spatial interface concept where:
+
+1. **Spatial Coordinate System**: The application exists in a 3D coordinate space where:
+   - The user's viewport is a central plane at Z=0
+   - Objects can move from negative Z-space (behind the viewport) through the viewport to positive Z-space
+   - Interface elements exist as planes in this coordinate system
+
+2. **Viewing Plane**: The main interface that users interact with:
+   - Exists at Z=0 in the coordinate system
+   - Represented as a 2D plane in 3D space
+   - Objects in space can intersect and interact with this plane
+
+3. **Object Interaction**: 
+   - 3D objects (neon comets, energy spheres, etc.) can move through the viewing plane
+   - When objects pass through the viewing plane, special visual effects are triggered
+   - Physics simulations allow for realistic interactions between objects and planes
+
+4. **Space Cubes**: 
+   - Define bounded regions of 3D space
+   - Contain central planes and boundary planes
+   - Allow for point-in-volume and intersection tests
 
 ## Development Workflow
 
@@ -115,8 +146,9 @@ The project uses a monorepo approach with workspaces for each component:
 1. **Immersive 3D Interface**: Built with Three.js and React Three Fiber
 2. **High-performance Physics**: Implemented with Rust and Rapier3D
 3. **Particle Systems**: Custom WebAssembly particle simulation
-4. **Custom Shaders**: GLSL shaders for visual effects (cosmic background, hypercube)
-5. **Responsive Design**: Adapts to different devices and screen sizes
+4. **Spatial Navigation**: Objects moving through defined planes and spaces
+5. **Custom Shaders**: GLSL shaders for visual effects (cosmic background, hypercube)
+6. **Responsive Design**: Adapts to different devices and screen sizes
 
 ## Architecture Design Patterns
 
@@ -125,7 +157,8 @@ The project uses a monorepo approach with workspaces for each component:
 - **WebAssembly Integration**: High-performance modules integrated with JavaScript
 - **Server-Side Rendering**: Next.js for optimal loading performance
 - **API Layer**: Express backend with RESTful endpoints
+- **Spatial Coordinate System**: Mathematical model of 3D space with defined planes and intersections
 
 ## License
 
-MIT 
+MIT

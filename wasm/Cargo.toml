@@ -38,6 +38,13 @@ getrandom = { version = "0.2.12", features = ["js"] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 gloo-utils = "0.2.0"
+once_cell = "1.19.0"
+# Добавляем библиотеки для улучшенной 3D геометрии и рендеринга
+glam = "0.25.0"  # Высокопроизводительная математическая библиотека для графики
+rapier3d-f64 = { version = "0.18.0", features = ["wasm-bindgen"] } # Версия с двойной точностью для физики
+parry3d = "0.13.5"  # Библиотека для обнаружения столкновений и запросов близости
+bevy_math = "0.11.3"  # Математическая библиотека от Bevy для работы с 3D
+noise = "0.8.2"  # Библиотека для генерации различных шумов (Perlin, Simplex и др.)
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.37"
