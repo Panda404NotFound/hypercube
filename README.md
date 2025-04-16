@@ -158,7 +158,3 @@ The project uses a monorepo approach with workspaces for each component:
 - **Server-Side Rendering**: Next.js for optimal loading performance
 - **API Layer**: Express backend with RESTful endpoints
 - **Spatial Coordinate System**: Mathematical model of 3D space with defined planes and intersections
-
-## License
-
-MIT
